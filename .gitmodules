@@ -1,0 +1,3 @@
+[submodule "cmli"]
+	path = cmli
+	url = https://github.com/lccc-project/cmli.git

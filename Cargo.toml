@@ -1,0 +1,16 @@
+[package]
+name = "lxca-cg"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cmli = { path = "cmli", default-features = false }
+lxca = { git = "https://github.com/lccc-project/lxca" }
+
+[features]
+x86 = ["cmli/x86"]
+x86_64 = ["x86"]
+
+default-archs = ["x86"]
+all-archs = ["default-archs"]
+default = ["default-archs"]
