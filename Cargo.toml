@@ -6,11 +6,19 @@ edition = "2024"
 [dependencies]
 cmli = { path = "cmli", default-features = false }
 lxca = { git = "https://github.com/lccc-project/lxca" }
+lccc-targets = { git = "https://github.com/lccc-project/lccc-target" }
+target-tuples = { version = "0.16.0" }
 
 [features]
 x86 = ["cmli/x86"]
 x86_64 = ["x86"]
+test-files = ["lxca/test-files"]
 
 default-archs = ["x86"]
 all-archs = ["default-archs"]
 default = ["default-archs"]
+
+
+[[bin]]
+name = "lxca-cg-test"
+required-features = ["test-files"]

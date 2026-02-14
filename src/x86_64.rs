@@ -1,12 +1,20 @@
+use std::marker::PhantomData;
+
 use cmli::{
-    archs::x86::{X86Register, XmmSize},
+    archs::x86::{X86, X86Mode, X86Register, XmmSize},
     compiler::CompilerContext,
+    mach::MachineMode,
     target::PropertyValue,
+    traits::IdType as _,
     x86_registers,
     xva::XvaRegister,
 };
+use lccc_targets::properties::{ExtPropertyValue, target::Target};
 
-use crate::callconv::{CallConvSpec, ParameterFragmentClass, StackOrder};
+use crate::{
+    callconv::{CallConvSpec, ParameterFragmentClass, Spec, StackOrder},
+    xva::XvaCompiler,
+};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum X86_64Abi {
@@ -56,7 +64,7 @@ impl X86_64Abi {
 
 #[derive(Copy, Clone)]
 pub struct X86_64AbiState<'a> {
-    ctx: &'a CompilerContext,
+    ctx: &'a Target,
     vreg_pos: usize,
     greg_pos: usize,
     mark: Option<(usize, usize)>,
@@ -96,19 +104,13 @@ impl<'a> X86_64AbiState<'a> {
 impl CallConvSpec for X86_64Abi {
     type AssignParamsState<'a> = X86_64AbiState<'a>;
 
-    fn from_name(name: &str, ctx: &cmli::compiler::CompilerContext) -> Option<Self>
+    fn from_name(name: &str, ctx: &Target) -> Option<Self>
     where
         Self: Sized,
     {
         match name {
-            "C" => match ctx.property("lxca.default_tag") {
-                Some(PropertyValue::String(v)) => Self::from_name(v, ctx),
-                _ => None,
-            },
-            "system" => match ctx.property("lxca.system_tag") {
-                Some(PropertyValue::String(v)) => Self::from_name(v, ctx),
-                _ => None,
-            },
+            "C" => Self::from_name(&ctx.default_tag, ctx),
+            "system" => Self::from_name(&ctx.system_tag, ctx),
             "sysv64" => Some(Self::SysV),
             "msabi64" => Some(Self::Msabi),
             "vectorcall" => Some(Self::Vectorcall),
@@ -116,7 +118,7 @@ impl CallConvSpec for X86_64Abi {
         }
     }
 
-    fn make_state(ctx: &cmli::compiler::CompilerContext) -> Self::AssignParamsState<'_>
+    fn make_state(ctx: &Target) -> Self::AssignParamsState<'_>
     where
         Self: Sized,
     {
@@ -131,7 +133,7 @@ impl CallConvSpec for X86_64Abi {
     fn classify_int<F: FnMut(crate::callconv::ParameterFragmentClass, u32, u32)>(
         &self,
         bits: u16,
-        _: &cmli::compiler::CompilerContext,
+        _: &Target,
         mut v: F,
     ) {
         let total_fragments = (bits + 63) >> 6;
@@ -388,10 +390,7 @@ impl CallConvSpec for X86_64Abi {
         regs
     }
 
-    fn return_return_place(
-        &self,
-        frag: &[ParameterFragmentClass],
-    ) -> Option<ParameterFragmentClass> {
+    fn return_return_place(&self, _: &[ParameterFragmentClass]) -> Option<ParameterFragmentClass> {
         None // return place is never returned
     }
 
@@ -460,8 +459,12 @@ impl CallConvSpec for X86_64Abi {
 
     fn redzone(&self, state: &Self::AssignParamsState<'_>) -> u32 {
         match self {
-            X86_64Abi::SysV => match state.ctx.property("x86.abi.enable-redzone") {
-                Some(PropertyValue::Bool(true)) | None => 128,
+            X86_64Abi::SysV => match state
+                .ctx
+                .compile_default_properties(None)
+                .get("x86.abi.enable-redzone")
+            {
+                Some(ExtPropertyValue::Bool(true)) | None => 128,
                 Some(_) => 0,
             },
             X86_64Abi::Msabi | X86_64Abi::Vectorcall => 0,
@@ -470,5 +473,21 @@ impl CallConvSpec for X86_64Abi {
 
     fn callee_cleanup_size(&self, _state: &Self::AssignParamsState<'_>) -> u32 {
         0
+    }
+}
+
+pub struct X86_64Compiler;
+
+impl XvaCompiler for X86_64Compiler {
+    fn call_conv(&self) -> &dyn crate::callconv::CallConv {
+        const { &Spec::<X86_64Abi>::new() }
+    }
+
+    fn compiler(&self) -> &dyn cmli::compiler::Compiler {
+        const { &X86 }
+    }
+
+    fn machine_mode(&self) -> cmli::mach::MachineMode {
+        MachineMode::new(X86Mode::Long)
     }
 }

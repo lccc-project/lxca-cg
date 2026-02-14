@@ -2,6 +2,7 @@ use cmli::{
     compiler::{Compiler, CompilerContext},
     xva::XvaRegister,
 };
+use lccc_targets::properties::target::Target;
 use lxca::ir::{
     constant::ConstantPool,
     types::{IntType, Signature, Type},
@@ -57,7 +58,7 @@ pub trait CallConv {
         call_sig: Option<&Signature<'ir>>,
         fn_sig: &Signature<'ir>,
         pool: &ConstantPool<'ir>,
-        info: &CompilerContext,
+        info: &Target,
     ) -> Result<CallConvInfo, CallConvError>;
 }
 
@@ -80,18 +81,18 @@ pub enum ParameterFragmentClass {
 pub trait CallConvSpec {
     type AssignParamsState<'a>: 'a;
 
-    fn from_name(name: &str, ctx: &CompilerContext) -> Option<Self>
+    fn from_name(name: &str, ctx: &Target) -> Option<Self>
     where
         Self: Sized;
 
-    fn make_state(ctx: &CompilerContext) -> Self::AssignParamsState<'_>
+    fn make_state(ctx: &Target) -> Self::AssignParamsState<'_>
     where
         Self: Sized;
 
     fn classify_int<F: FnMut(ParameterFragmentClass, u32, u32)>(
         &self,
         bits: u16,
-        info: &CompilerContext,
+        info: &Target,
         v: F,
     );
 
@@ -138,7 +139,13 @@ pub trait CallConvSpec {
     fn callee_cleanup_size(&self, state: &Self::AssignParamsState<'_>) -> u32;
 }
 
-pub struct Spec<C>(pub PhantomData<C>);
+pub struct Spec<C>(PhantomData<C>);
+
+impl<C> Spec<C> {
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
 
 impl<C> CallConv for Spec<C>
 where
@@ -149,7 +156,7 @@ where
         call_sig: Option<&Signature<'ir>>,
         fn_sig: &Signature<'ir>,
         pool: &ConstantPool<'ir>,
-        ctx: &CompilerContext,
+        ctx: &Target,
     ) -> Result<CallConvInfo, CallConvError> {
         let tag = fn_sig.tag(pool);
 
@@ -248,7 +255,7 @@ fn classify_ty<'ir>(
     ty: &Type<'ir>,
     pool: &ConstantPool<'ir>,
     spec: &impl CallConvSpec,
-    info: &CompilerContext,
+    info: &Target,
 ) -> (Vec<ParameterFragmentClass>, Vec<(u32, u32)>) {
     let mut frag_array = Vec::new();
     let mut extent_array = Vec::new();
@@ -268,10 +275,14 @@ fn classify_ty<'ir>(
             });
         }
         lxca::ir::types::TypeBody::Pointer(pointer_type) => {
-            spec.classify_int(info.properties.ptr_width, info, |frag, base, len| {
-                frag_array.push(frag);
-                extent_array.push((base, len));
-            });
+            spec.classify_int(
+                info.primitive_layout.int_layout.short_pointer_width,
+                info,
+                |frag, base, len| {
+                    frag_array.push(frag);
+                    extent_array.push((base, len));
+                },
+            );
         }
         lxca::ir::types::TypeBody::Function(signature) => panic!("Cannot Classify Function Types"),
         lxca::ir::types::TypeBody::Void => {}
