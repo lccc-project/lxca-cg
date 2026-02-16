@@ -125,7 +125,7 @@ dependencies = [
 [[package]]
 name = "lxca"
 version = "0.1.0"
-source = "git+https://github.com/lccc-project/lxca#fee845b422c33be27251024b7a1e702276024b13"
+source = "git+https://github.com/lccc-project/lxca#dd1b4fecdd95f2cf1e8b76d9c8ab4b689b12c09b"
 dependencies = [
  "bitflags",
  "hashbrown 0.15.5",
@@ -147,7 +147,7 @@ dependencies = [
 [[package]]
 name = "lxca-derive"
 version = "0.1.0"
-source = "git+https://github.com/lccc-project/lxca#fee845b422c33be27251024b7a1e702276024b13"
+source = "git+https://github.com/lccc-project/lxca#dd1b4fecdd95f2cf1e8b76d9c8ab4b689b12c09b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -255,9 +255,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.115"
+version = "2.0.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e614ed320ac28113fa64972c4262d5dbc89deacdfd00c34a3e4cea073243c12"
+checksum = "3df424c70518695237746f84cede799c9c58fcb37450d7b23716568cc8bc69cb"
 dependencies = [
  "proc-macro2",
  "quote",

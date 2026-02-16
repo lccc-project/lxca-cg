@@ -243,7 +243,41 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             lxca::ir::expr::ExprBody::UnaryOp(unary_op, overflow_behaviour, box_or_constant) => {
                 todo!()
             }
-            lxca::ir::expr::ExprBody::BinaryOp(bin) => todo!("binary op"),
+            lxca::ir::expr::ExprBody::BinaryOp(bin) => {
+                let ty = expr.ty();
+                let layout = layout_type(ty, self.constants, self.target);
+                let xva_ty = layout.xva_type();
+                let left = bin.2.get(self.constants);
+                let right = bin.3.get(self.constants);
+
+                let dest_left = XvaRegister::Virtual(XvaDest {
+                    id: self.vreg_num.fetch_inc(),
+                    ty: xva_ty,
+                });
+                let dest_right = XvaRegister::Virtual(XvaDest {
+                    id: self.vreg_num.fetch_inc(),
+                    ty: xva_ty,
+                });
+
+                self.lower_expr(dest_left, left);
+                self.lower_expr(dest_right, right);
+
+                match bin.0 {
+                    lxca::ir::expr::BinaryOp::Add => XvaOpcode::BinaryOp {
+                        op: xva::BinaryOp::Add,
+                        left: dest_left,
+                        right: xva::XvaOperand::Register(dest_right),
+                    },
+                    lxca::ir::expr::BinaryOp::Sub => XvaOpcode::BinaryOp {
+                        op: xva::BinaryOp::Add,
+                        left: dest_left,
+                        right: xva::XvaOperand::Register(dest_right),
+                    },
+                    lxca::ir::expr::BinaryOp::Mul => todo!(),
+                    lxca::ir::expr::BinaryOp::Div => todo!(),
+                    lxca::ir::expr::BinaryOp::Mod => todo!(),
+                }
+            }
             lxca::ir::expr::ExprBody::ReadField(box_or_constant, constant, constant1) => todo!(),
             lxca::ir::expr::ExprBody::ProjectField(box_or_constant, constant, constant1) => todo!(),
             lxca::ir::expr::ExprBody::Struct(constant, items) => todo!(),

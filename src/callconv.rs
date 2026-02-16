@@ -247,6 +247,10 @@ where
 
         info.callee_cleanup_size = cc.callee_cleanup_size(&state);
 
+        info.preserved_registers = cc.non_volatile_registers();
+
+        info.volatile_registers = cc.volatile_registers();
+
         Ok(info)
     }
 }
