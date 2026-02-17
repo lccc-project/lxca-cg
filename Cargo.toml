@@ -8,6 +8,10 @@ cmli = { path = "cmli", default-features = false }
 lxca = { git = "https://github.com/lccc-project/lxca" }
 lccc-targets = { git = "https://github.com/lccc-project/lccc-target" }
 target-tuples = { version = "0.16.0" }
+indexmap = "2.13.0"
+lccc-siphash = { git = "https://github.com/lccc-project/lccc-siphash", version = "0.1.0", features = [
+    "random-state",
+] }
 
 [features]
 x86 = ["cmli/x86"]

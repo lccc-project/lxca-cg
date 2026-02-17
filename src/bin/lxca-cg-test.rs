@@ -38,4 +38,16 @@ fn main() {
 
     println!("xva:");
     println!("{}", xva.pretty_print(mach));
+
+    let xva = lxca::ir::with_context(|ctx| {
+        println!("hello world test");
+        let file = test_files::hello_world(target_name, ctx);
+        println!("lxca:");
+        println!("{file:#?}");
+
+        lower_lxca(&file, &target, &compiler)
+    });
+
+    println!("xva:");
+    println!("{}", xva.pretty_print(mach));
 }

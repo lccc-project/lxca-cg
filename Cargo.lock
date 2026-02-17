@@ -57,6 +57,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
+name = "getrandom"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "r-efi",
+ "wasip2",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -96,7 +108,10 @@ dependencies = [
 [[package]]
 name = "lccc-siphash"
 version = "0.1.0"
-source = "git+https://github.com/lccc-project/lccc-siphash.git#ceeac5b5fdc6338d3961df475e751c94142d3a06"
+source = "git+https://github.com/lccc-project/lccc-siphash#539876d486a3be67f061afa0c37075fc77aae14b"
+dependencies = [
+ "getrandom",
+]
 
 [[package]]
 name = "lccc-targets"
@@ -125,7 +140,7 @@ dependencies = [
 [[package]]
 name = "lxca"
 version = "0.1.0"
-source = "git+https://github.com/lccc-project/lxca#dd1b4fecdd95f2cf1e8b76d9c8ab4b689b12c09b"
+source = "git+https://github.com/lccc-project/lxca#f4b364860e1612bd55d1605dc16e3edfe845ce3e"
 dependencies = [
  "bitflags",
  "hashbrown 0.15.5",
@@ -139,6 +154,8 @@ name = "lxca-cg"
 version = "0.1.0"
 dependencies = [
  "cmli",
+ "indexmap",
+ "lccc-siphash",
  "lccc-targets",
  "lxca",
  "target-tuples",
@@ -147,7 +164,7 @@ dependencies = [
 [[package]]
 name = "lxca-derive"
 version = "0.1.0"
-source = "git+https://github.com/lccc-project/lxca#dd1b4fecdd95f2cf1e8b76d9c8ab4b689b12c09b"
+source = "git+https://github.com/lccc-project/lxca#f4b364860e1612bd55d1605dc16e3edfe845ce3e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -215,6 +232,12 @@ checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "r-efi"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "redox_syscall"
@@ -291,9 +314,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.23"
+version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "537dd038a89878be9b64dd4bd1b260315c1bb94f4d784956b81e27a088d9a09e"
+checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "uuid"
@@ -303,6 +326,15 @@ checksum = "b672338555252d43fd2240c714dc444b8c6fb0a5c5335e65a07bba7742735ddb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "wasip2"
+version = "1.0.2+wasi-0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5"
+dependencies = [
+ "wit-bindgen",
 ]
 
 [[package]]
@@ -355,3 +387,9 @@ name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+
+[[package]]
+name = "wit-bindgen"
+version = "0.51.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
