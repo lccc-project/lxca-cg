@@ -697,11 +697,11 @@ impl DataMap {
         DataMap(IndexMap::with_hasher(rs.clone()), rs)
     }
 
-    pub fn insert(&mut self, data: &[u8]) -> cmli::intern::Symbol {
-        if let Some(sym) = self.0.get(data) {
+    pub fn insert<S: AsRef<[u8]> + Into<Vec<u8>>>(&mut self, data: S) -> cmli::intern::Symbol {
+        if let Some(sym) = self.0.get(data.as_ref()) {
             *sym
         } else {
-            let hash = self.1.hash_one(data);
+            let hash = self.1.hash_one(data.as_ref());
 
             let i = self.0.len();
 
@@ -709,7 +709,7 @@ impl DataMap {
 
             let sym = cmli::intern::Symbol::intern(name);
 
-            self.0.insert(data.to_vec(), sym);
+            self.0.insert(data.into(), sym);
 
             sym
         }
