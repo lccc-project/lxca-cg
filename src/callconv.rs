@@ -39,6 +39,12 @@ pub struct CallConvInfo {
     pub callee_cleanup_size: u32,
     /// The size of the redzone (asynchronous code preserved region)
     pub redzone_size: u32,
+    /// The Alignment of the stack Region (subject to the alignment offset parameters below)
+    pub stack_align: u32,
+    /// The offset of alignment when the function is entered
+    pub stack_offset_entry: u32,
+    /// The offset of alignment before the call instruction
+    pub stack_offset_call: u32,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Default)]
@@ -100,28 +106,28 @@ pub trait CallConvSpec {
 
     fn replace_with_memory_param(
         &self,
-        frags: &[ParameterFragmentClass],
-    ) -> Option<ParameterFragmentClass>;
+        frags: &[(ParameterFragmentClass, u32)],
+    ) -> Option<(ParameterFragmentClass, u32)>;
 
     fn replace_with_memory_return(
         &self,
-        frags: &[ParameterFragmentClass],
-    ) -> Option<ParameterFragmentClass>;
+        frags: &[(ParameterFragmentClass, u32)],
+    ) -> Option<(ParameterFragmentClass, u32)>;
 
     fn assign_registers_param(
         &self,
-        frags: &[ParameterFragmentClass],
+        frags: &[(ParameterFragmentClass, u32)],
         state: &mut Self::AssignParamsState<'_>,
         is_varargs: bool,
     ) -> Option<Vec<XvaRegister>>;
 
-    fn assign_registers_return(&self, frags: &[ParameterFragmentClass]) -> Vec<XvaRegister>;
+    fn assign_registers_return(&self, frags: &[(ParameterFragmentClass, u32)]) -> Vec<XvaRegister>;
 
     /// If the return place parameter is returned for a given set of fragments specify the class of that return value
     fn return_return_place(
         &self,
-        frag: &[ParameterFragmentClass],
-    ) -> Option<ParameterFragmentClass>;
+        frag: &[(ParameterFragmentClass, u32)],
+    ) -> Option<(ParameterFragmentClass, u32)>;
 
     fn volatile_registers(&self) -> Vec<XvaRegister>;
 
@@ -137,6 +143,10 @@ pub trait CallConvSpec {
     fn redzone(&self, state: &Self::AssignParamsState<'_>) -> u32;
 
     fn callee_cleanup_size(&self, state: &Self::AssignParamsState<'_>) -> u32;
+
+    /// The alignment of the stack. The first value is the alignment multiplier.
+    /// The second is the offset of the stack alignment before the call instruction, the third is the offset of the stack alignment at the function entry
+    fn stack_align(&self) -> (u32, u32, u32);
 }
 
 pub struct Spec<C>(PhantomData<C>);
@@ -251,6 +261,12 @@ where
 
         info.volatile_registers = cc.volatile_registers();
 
+        (
+            info.stack_align,
+            info.stack_offset_call,
+            info.stack_offset_entry,
+        ) = cc.stack_align();
+
         Ok(info)
     }
 }
@@ -260,7 +276,7 @@ fn classify_ty<'ir>(
     pool: &ConstantPool<'ir>,
     spec: &impl CallConvSpec,
     info: &Target,
-) -> (Vec<ParameterFragmentClass>, Vec<(u32, u32)>) {
+) -> (Vec<(ParameterFragmentClass, u32)>, Vec<(u32, u32)>) {
     let mut frag_array = Vec::new();
     let mut extent_array = Vec::new();
     match ty.body(pool) {
@@ -268,13 +284,13 @@ fn classify_ty<'ir>(
         lxca::ir::types::TypeBody::Named(constant) => todo!("named type"),
         lxca::ir::types::TypeBody::Integer(int_type) => {
             spec.classify_int(int_type.width, info, |frag, base, len| {
-                frag_array.push(frag);
+                frag_array.push((frag, len));
                 extent_array.push((base, len));
             });
         }
         lxca::ir::types::TypeBody::Char(bits) => {
             spec.classify_int(*bits, info, |frag, base, len| {
-                frag_array.push(frag);
+                frag_array.push((frag, len));
                 extent_array.push((base, len));
             });
         }
@@ -283,13 +299,14 @@ fn classify_ty<'ir>(
                 info.primitive_layout.int_layout.short_pointer_width,
                 info,
                 |frag, base, len| {
-                    frag_array.push(frag);
+                    frag_array.push((frag, base));
                     extent_array.push((base, len));
                 },
             );
         }
         lxca::ir::types::TypeBody::Function(signature) => panic!("Cannot Classify Function Types"),
         lxca::ir::types::TypeBody::Void => {}
+        _ => todo!(),
     }
 
     (frag_array, extent_array)

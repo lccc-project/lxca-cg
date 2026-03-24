@@ -104,5 +104,6 @@ pub fn layout_type<'ir>(
         ),
         lxca::ir::types::TypeBody::Function(_) => panic!("Cannot layout a function type"),
         lxca::ir::types::TypeBody::Void => panic!("Cannot layout void"),
+        _ => todo!(),
     }
 }

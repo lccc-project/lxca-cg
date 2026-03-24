@@ -16,9 +16,9 @@ checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
 
 [[package]]
 name = "bumpalo"
-version = "3.19.1"
+version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
+checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 
 [[package]]
 name = "cfg-if"
@@ -140,7 +140,7 @@ dependencies = [
 [[package]]
 name = "lxca"
 version = "0.1.0"
-source = "git+https://github.com/lccc-project/lxca#f4b364860e1612bd55d1605dc16e3edfe845ce3e"
+source = "git+https://github.com/lccc-project/lxca#400b2adaae2a4d98307562d87ec5ae76b3362ba4"
 dependencies = [
  "bitflags",
  "hashbrown 0.15.5",
@@ -164,7 +164,7 @@ dependencies = [
 [[package]]
 name = "lxca-derive"
 version = "0.1.0"
-source = "git+https://github.com/lccc-project/lxca#f4b364860e1612bd55d1605dc16e3edfe845ce3e"
+source = "git+https://github.com/lccc-project/lxca#400b2adaae2a4d98307562d87ec5ae76b3362ba4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -278,9 +278,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.116"
+version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3df424c70518695237746f84cede799c9c58fcb37450d7b23716568cc8bc69cb"
+checksum = "e665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99"
 dependencies = [
  "proc-macro2",
  "quote",

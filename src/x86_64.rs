@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use cmli::{
-    archs::x86::{X86, X86Mode, X86Register, XmmSize},
+    archs::x86::{GprSize, X86, X86Mode, X86Register, XmmSize},
     compiler::CompilerContext,
     mach::MachineMode,
     target::PropertyValue,
@@ -138,6 +138,7 @@ impl CallConvSpec for X86_64Abi {
     ) {
         let total_fragments = (bits + 63) >> 6;
         let mut total_len = (bits + 7) >> 3;
+        eprintln!("int({bits} = {total_len} bytes");
         for x in 0..total_fragments {
             let frag_base = (x * 8) as u32;
             let len = total_len.min(8);
@@ -152,19 +153,21 @@ impl CallConvSpec for X86_64Abi {
 
     fn assign_registers_param(
         &self,
-        frags: &[ParameterFragmentClass],
+        frags: &[(ParameterFragmentClass, u32)],
         state: &mut Self::AssignParamsState<'_>,
         _: bool,
     ) -> Option<Vec<cmli::xva::XvaRegister>> {
         match frags {
-            [ParameterFragmentClass::Integer] => {
+            [(ParameterFragmentClass::Integer, len)] => {
                 let reg = state.next_greg(*self)?;
 
-                Some(vec![XvaRegister::physical(reg)])
+                Some(vec![XvaRegister::physical(
+                    reg.promote_gpr(GprSize::from_size(*len)),
+                )])
             }
             [
-                ParameterFragmentClass::Integer,
-                ParameterFragmentClass::Integer,
+                (ParameterFragmentClass::Integer, len1),
+                (ParameterFragmentClass::Integer, len2),
             ] => {
                 state.mark();
                 let (Some(reg1), Some(reg2)) = (state.next_greg(*self), state.next_greg(*self))
@@ -174,18 +177,18 @@ impl CallConvSpec for X86_64Abi {
                 };
 
                 Some(vec![
-                    XvaRegister::physical(reg1),
-                    XvaRegister::physical(reg2),
+                    XvaRegister::physical(reg1.promote_gpr(GprSize::from_size(*len1))),
+                    XvaRegister::physical(reg2.promote_gpr(GprSize::from_size(*len2))),
                 ])
             }
-            [ParameterFragmentClass::Vector] => {
+            [(ParameterFragmentClass::Vector, _)] => {
                 let reg = state.next_vreg(*self)?;
 
                 Some(vec![XvaRegister::physical(reg)])
             }
             [
-                ParameterFragmentClass::Vector,
-                ParameterFragmentClass::Extension,
+                (ParameterFragmentClass::Vector, _),
+                (ParameterFragmentClass::Extension, _),
                 ..,
             ] => {
                 let xmm = state.next_vreg(*self)?;
@@ -201,8 +204,8 @@ impl CallConvSpec for X86_64Abi {
                 Some(vec![XvaRegister::physical(reg)])
             }
             [
-                ParameterFragmentClass::Vector,
-                ParameterFragmentClass::Vector,
+                (ParameterFragmentClass::Vector, _),
+                (ParameterFragmentClass::Vector, _),
             ] => {
                 state.mark();
                 let (Some(reg1), Some(reg2)) = (state.next_vreg(*self), state.next_vreg(*self))
@@ -217,8 +220,8 @@ impl CallConvSpec for X86_64Abi {
                 ])
             }
             [
-                ParameterFragmentClass::Integer,
-                ParameterFragmentClass::Vector,
+                (ParameterFragmentClass::Integer, len),
+                (ParameterFragmentClass::Vector, _),
             ] => {
                 state.mark();
                 let (Some(reg1), Some(reg2)) = (state.next_greg(*self), state.next_vreg(*self))
@@ -227,13 +230,13 @@ impl CallConvSpec for X86_64Abi {
                     return None;
                 };
                 Some(vec![
-                    XvaRegister::physical(reg1),
+                    XvaRegister::physical(reg1.promote_gpr(GprSize::from_size(*len))),
                     XvaRegister::physical(reg2),
                 ])
             }
             [
-                ParameterFragmentClass::Vector,
-                ParameterFragmentClass::Integer,
+                (ParameterFragmentClass::Vector, _),
+                (ParameterFragmentClass::Integer, len),
             ] => {
                 state.mark();
                 let (Some(reg1), Some(reg2)) = (state.next_vreg(*self), state.next_greg(*self))
@@ -243,7 +246,7 @@ impl CallConvSpec for X86_64Abi {
                 };
                 Some(vec![
                     XvaRegister::physical(reg1),
-                    XvaRegister::physical(reg2),
+                    XvaRegister::physical(reg2.promote_gpr(GprSize::from_size(*len))),
                 ])
             }
             _ => unreachable!(),
@@ -252,30 +255,36 @@ impl CallConvSpec for X86_64Abi {
 
     fn replace_with_memory_param(
         &self,
-        frags: &[ParameterFragmentClass],
-    ) -> Option<ParameterFragmentClass> {
+        frags: &[(ParameterFragmentClass, u32)],
+    ) -> Option<(ParameterFragmentClass, u32)> {
         // ScalarFloat is used for long-double only
-        if frags.contains(&ParameterFragmentClass::Memory)
-            || frags.contains(&ParameterFragmentClass::ScalarFloat)
+        if frags
+            .iter()
+            .map(|(v, _)| v)
+            .any(|v| *v == ParameterFragmentClass::Memory)
+            || frags
+                .iter()
+                .map(|(v, _)| v)
+                .any(|v| *v == ParameterFragmentClass::ScalarFloat)
         {
-            return Some(ParameterFragmentClass::Integer);
+            return Some((ParameterFragmentClass::Integer, 8));
         }
 
         if frags.len() > self.max_param_frags() {
             match frags {
-                [ParameterFragmentClass::Vector, rest @ ..]
+                [(ParameterFragmentClass::Vector, _), rest @ ..]
                     if frags.len() <= self.max_sseup_frags() =>
                 {
                     if !rest
                         .iter()
-                        .all(|frag| *frag == ParameterFragmentClass::Extension)
+                        .all(|(frag, _)| *frag == ParameterFragmentClass::Extension)
                     {
-                        return Some(ParameterFragmentClass::Integer);
+                        return Some((ParameterFragmentClass::Integer, 8));
                     } else {
                         return None;
                     }
                 }
-                _ => return Some(ParameterFragmentClass::Integer),
+                _ => return Some((ParameterFragmentClass::Integer, 8)),
             }
         }
 
@@ -284,44 +293,50 @@ impl CallConvSpec for X86_64Abi {
 
     fn replace_with_memory_return(
         &self,
-        frags: &[ParameterFragmentClass],
-    ) -> Option<ParameterFragmentClass> {
+        frags: &[(ParameterFragmentClass, u32)],
+    ) -> Option<(ParameterFragmentClass, u32)> {
         // Special-case st(0), st(1)
         match frags {
             [
-                ParameterFragmentClass::ScalarFloat,
-                ParameterFragmentClass::Extension,
+                (ParameterFragmentClass::ScalarFloat, _),
+                (ParameterFragmentClass::Extension, _),
             ] if self.allow_x87_return() => return None,
             [
-                ParameterFragmentClass::ScalarFloat,
-                ParameterFragmentClass::Extension,
-                ParameterFragmentClass::Extension,
-                ParameterFragmentClass::Extension,
+                (ParameterFragmentClass::ScalarFloat, _),
+                (ParameterFragmentClass::Extension, _),
+                (ParameterFragmentClass::Extension, _),
+                (ParameterFragmentClass::Extension, _),
             ] if self.allow_x87_return() => return None,
             _ => {}
         }
         // ScalarFloat is used for long-double only
-        if frags.contains(&ParameterFragmentClass::Memory)
-            || frags.contains(&ParameterFragmentClass::ScalarFloat)
+        if frags
+            .iter()
+            .map(|(v, _)| v)
+            .any(|v| *v == ParameterFragmentClass::Memory)
+            || frags
+                .iter()
+                .map(|(v, _)| v)
+                .any(|v| *v == ParameterFragmentClass::ScalarFloat)
         {
-            return Some(ParameterFragmentClass::Integer);
+            return Some((ParameterFragmentClass::Integer, 8));
         }
 
         if frags.len() > self.max_param_frags() {
             match frags {
-                [ParameterFragmentClass::Vector, rest @ ..]
+                [(ParameterFragmentClass::Vector, _), rest @ ..]
                     if frags.len() <= self.max_sseup_frags() =>
                 {
                     if !rest
                         .iter()
-                        .all(|frag| *frag == ParameterFragmentClass::Extension)
+                        .all(|(frag, _)| *frag == ParameterFragmentClass::Extension)
                     {
-                        return Some(ParameterFragmentClass::Integer);
+                        return Some((ParameterFragmentClass::Integer, 8));
                     } else {
                         return None;
                     }
                 }
-                _ => return Some(ParameterFragmentClass::Integer),
+                _ => return Some((ParameterFragmentClass::Integer, 8)),
             }
         }
 
@@ -330,15 +345,15 @@ impl CallConvSpec for X86_64Abi {
 
     fn assign_registers_return(
         &self,
-        frags: &[ParameterFragmentClass],
+        frags: &[(ParameterFragmentClass, u32)],
     ) -> Vec<cmli::xva::XvaRegister> {
         let mut regs = Vec::with_capacity(frags.len().min(2));
 
         // Special Cases
         match frags {
             [
-                ParameterFragmentClass::Vector,
-                ParameterFragmentClass::Extension,
+                (ParameterFragmentClass::Vector, _),
+                (ParameterFragmentClass::Extension, _),
                 ..,
             ] => {
                 let xmm = X86Register::Xmm(0);
@@ -354,16 +369,16 @@ impl CallConvSpec for X86_64Abi {
                 regs.push(XvaRegister::physical(reg))
             }
             [
-                ParameterFragmentClass::ScalarFloat,
-                ParameterFragmentClass::Extension,
+                (ParameterFragmentClass::ScalarFloat, _),
+                (ParameterFragmentClass::Extension, _),
             ] => {
                 regs.push(XvaRegister::physical(X86Register::St(0)));
             }
             [
-                ParameterFragmentClass::ScalarFloat,
-                ParameterFragmentClass::Extension,
-                ParameterFragmentClass::Extension,
-                ParameterFragmentClass::Extension,
+                (ParameterFragmentClass::ScalarFloat, _),
+                (ParameterFragmentClass::Extension, _),
+                (ParameterFragmentClass::Extension, _),
+                (ParameterFragmentClass::Extension, _),
             ] => {
                 regs.push(XvaRegister::physical(X86Register::St(0)));
                 regs.push(XvaRegister::physical(X86Register::St(1)));
@@ -371,17 +386,20 @@ impl CallConvSpec for X86_64Abi {
             frags => {
                 for (i, frag) in frags.iter().enumerate() {
                     match frag {
-                        ParameterFragmentClass::Integer => {
-                            regs.push(XvaRegister::physical(x86_registers![rax, rdx][i]))
-                        }
+                        (ParameterFragmentClass::Integer, len) => regs.push(XvaRegister::physical(
+                            x86_registers![rax, rdx][i].promote_gpr(GprSize::from_size(*len)),
+                        )),
 
-                        ParameterFragmentClass::Vector => {
+                        (ParameterFragmentClass::Vector, _) => {
                             regs.push(XvaRegister::physical(x86_registers![xmm0, xmm1][i]))
                         }
-                        ParameterFragmentClass::ScalarFloat
-                        | ParameterFragmentClass::Extension
-                        | ParameterFragmentClass::Memory
-                        | ParameterFragmentClass::Other(_) => unreachable!(),
+                        (
+                            ParameterFragmentClass::ScalarFloat
+                            | ParameterFragmentClass::Extension
+                            | ParameterFragmentClass::Memory
+                            | ParameterFragmentClass::Other(_),
+                            _,
+                        ) => unreachable!(),
                     }
                 }
             }
@@ -390,7 +408,10 @@ impl CallConvSpec for X86_64Abi {
         regs
     }
 
-    fn return_return_place(&self, _: &[ParameterFragmentClass]) -> Option<ParameterFragmentClass> {
+    fn return_return_place(
+        &self,
+        _: &[(ParameterFragmentClass, u32)],
+    ) -> Option<(ParameterFragmentClass, u32)> {
         None // return place is never returned
     }
 
@@ -473,6 +494,10 @@ impl CallConvSpec for X86_64Abi {
 
     fn callee_cleanup_size(&self, _state: &Self::AssignParamsState<'_>) -> u32 {
         0
+    }
+
+    fn stack_align(&self) -> (u32, u32, u32) {
+        (16, 0, 8)
     }
 }
 

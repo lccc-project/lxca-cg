@@ -4,8 +4,9 @@ use cmli::{
     compiler::Compiler,
     mach::MachineMode,
     xva::{
-        self, Linkage, XvaCategory, XvaDest, XvaExpr, XvaFile, XvaFunction, XvaFunctionDef,
-        XvaObjectDef, XvaOpcode, XvaOperand, XvaRegister, XvaStatement, XvaType,
+        self, BarrierKind, Linkage, XvaBasicBlock, XvaCategory, XvaDest, XvaExpr, XvaFile,
+        XvaFunction, XvaFunctionDef, XvaObjectDef, XvaOpcode, XvaOperand, XvaRegister,
+        XvaStatement, XvaType,
     },
 };
 use indexmap::{IndexMap, IndexSet};
@@ -14,8 +15,11 @@ use lccc_targets::properties::target::Target;
 use lxca::ir::{
     constant::{Constant, ConstantPool},
     decls::{DeclarationBody, FunctionBody},
-    expr::{BasicBlock, Expr, FunctionCall, JumpTarget, Statement, Terminator, Value},
+    expr::{
+        BasicBlock, Expr, FunctionCall, IntrinsicCall, JumpTarget, Statement, Terminator, Value,
+    },
     file::File,
+    intrinsics::Intrinsic,
     symbol::Symbol,
     types::Signature,
 };
@@ -38,12 +42,15 @@ pub trait XvaCompiler {
     #[allow(unused)]
     fn lower_intrinsic_call<'ir>(
         &self,
-        name: &str,
+        name: &Symbol,
         const_args: &[Value<'ir>],
         args: &[XvaRegister],
         output: &mut Vec<XvaStatement>,
-    ) -> Option<Result<(), IntrinsicError>> {
-        None
+        constant_pool: &ConstantPool<'ir>,
+        output_ty: XvaType,
+        vreg_supplier: &mut dyn FnMut(XvaType) -> XvaRegister,
+    ) -> Result<XvaRegister, IntrinsicError> {
+        Err(())
     }
 }
 
@@ -53,6 +60,7 @@ struct XvaLowerer<'ir, 'a> {
     local_vars: IndexMap<Constant<'ir, Symbol>, IndexMap<Constant<'ir, Symbol>, XvaRegister>>,
     cc: Option<&'a dyn CallConv>,
     xva_function: XvaFunction,
+    current_statements: Vec<XvaStatement>,
     constants: &'a ConstantPool<'ir>,
     strings: &'a mut DataMap,
     info: Option<CallConvInfo>,
@@ -60,6 +68,7 @@ struct XvaLowerer<'ir, 'a> {
     ret_ptr: Option<XvaRegister>,
     name: Constant<'ir, Symbol>,
     cur_label: Option<Constant<'ir, Symbol>>,
+    opt_gate_num: u32,
 }
 
 impl<'ir, 'a> XvaLowerer<'ir, 'a> {
@@ -78,8 +87,14 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 params: Vec::new(),
                 preserve_regs: Vec::new(),
                 return_reg: Vec::new(),
-                statement: Vec::new(),
+                body: Vec::new(),
+                frame_size: 0,
+                frame_align: 1,
+                call_align: 1,
+                call_align_offset: 0,
+                has_prologue: true,
             },
+            current_statements: Vec::new(),
             cc: None,
             constants,
             info: None,
@@ -88,6 +103,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             name,
             strings,
             cur_label: None,
+            opt_gate_num: 0,
         }
     }
 
@@ -198,13 +214,11 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 });
                 self.ret_ptr = Some(ret_ptr);
 
-                self.xva_function
-                    .statement
-                    .push(XvaStatement::Expr(XvaExpr {
-                        dest: ret_ptr,
-                        dest2: None,
-                        op: XvaOpcode::Move(*reg),
-                    }));
+                self.current_statements.push(XvaStatement::Expr(XvaExpr {
+                    dest: ret_ptr,
+                    dest2: None,
+                    op: XvaOpcode::Move(*reg),
+                }));
 
                 if let Some(v) = info.return_place {
                     self.xva_function.return_reg.push(v);
@@ -214,6 +228,9 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 panic!("Cannot return directly on the stack")
             }
         }
+
+        self.xva_function.call_align = info.stack_align as usize;
+        self.xva_function.call_align_offset = info.stack_offset_entry as usize;
 
         self.info = Some(info);
     }
@@ -261,15 +278,15 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 }
                 lxca::ir::expr::ValueBody::Uninit => XvaOpcode::Uninit,
                 lxca::ir::expr::ValueBody::Invalid => {
-                    self.xva_function
-                        .statement
+                    self.current_statements
                         .push(XvaStatement::Trap(cmli::xva::XvaTrap::Unreachable));
 
                     XvaOpcode::Uninit
                 }
                 lxca::ir::expr::ValueBody::Null => XvaOpcode::ZeroInit,
                 lxca::ir::expr::ValueBody::ZeroInit => XvaOpcode::ZeroInit,
-                lxca::ir::expr::ValueBody::Struct(struct_value) => todo!(),
+                lxca::ir::expr::ValueBody::Struct(struct_value) => todo!("struct"),
+                _ => todo!(),
             },
             lxca::ir::expr::ExprBody::UnaryOp(unary_op, overflow_behaviour, box_or_constant) => {
                 todo!()
@@ -300,7 +317,22 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                         right: xva::XvaOperand::Register(dest_right),
                     },
                     lxca::ir::expr::BinaryOp::Sub => XvaOpcode::BinaryOp {
-                        op: xva::BinaryOp::Add,
+                        op: xva::BinaryOp::Sub,
+                        left: dest_left,
+                        right: xva::XvaOperand::Register(dest_right),
+                    },
+                    lxca::ir::expr::BinaryOp::And => XvaOpcode::BinaryOp {
+                        op: xva::BinaryOp::And,
+                        left: dest_left,
+                        right: xva::XvaOperand::Register(dest_right),
+                    },
+                    lxca::ir::expr::BinaryOp::Or => XvaOpcode::BinaryOp {
+                        op: xva::BinaryOp::Or,
+                        left: dest_left,
+                        right: xva::XvaOperand::Register(dest_right),
+                    },
+                    lxca::ir::expr::BinaryOp::Xor => XvaOpcode::BinaryOp {
+                        op: xva::BinaryOp::Xor,
                         left: dest_left,
                         right: xva::XvaOperand::Register(dest_right),
                     },
@@ -311,16 +343,21 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             }
             lxca::ir::expr::ExprBody::ReadField(box_or_constant, constant, constant1) => todo!(),
             lxca::ir::expr::ExprBody::ProjectField(box_or_constant, constant, constant1) => todo!(),
-            lxca::ir::expr::ExprBody::Struct(constant, items) => todo!(),
+            lxca::ir::expr::ExprBody::SsaVar(var) => {
+                let cur_label = self.cur_label.unwrap();
+
+                let val = *self.local_vars.get(&cur_label).unwrap().get(var).unwrap();
+
+                XvaOpcode::Move(val)
+            }
+            _ => todo!(),
         };
 
-        self.xva_function
-            .statement
-            .push(XvaStatement::Expr(XvaExpr {
-                dest,
-                dest2: None,
-                op: expr,
-            }));
+        self.current_statements.push(XvaStatement::Expr(XvaExpr {
+            dest,
+            dest2: None,
+            op: expr,
+        }));
     }
 
     fn lower_expr_as_operand(&mut self, expr: &Expr<'ir>) -> XvaOperand {
@@ -364,6 +401,13 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                     XvaOperand::Register(reg)
                 }
             },
+            lxca::ir::expr::ExprBody::SsaVar(var) => {
+                let cur_label = self.cur_label.unwrap();
+
+                let val = *self.local_vars.get(&cur_label).unwrap().get(var).unwrap();
+
+                XvaOperand::Register(val)
+            }
             _ => {
                 let reg = XvaRegister::Virtual(XvaDest {
                     id: self.vreg_num.fetch_inc(),
@@ -401,6 +445,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                     .unwrap()
                     .insert(stmt.id, dest);
             }
+            _ => todo!("statement"),
         }
     }
 
@@ -436,14 +481,15 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             .compute_call_conv(Some(call_sig), fn_sig, self.constants, self.target)
             .unwrap();
 
+        self.xva_function.frame_align =
+            self.xva_function.frame_align.max(info.stack_align as usize); // Todo slide adjustment
+
         for (reg, val) in info.extra_sets {
-            self.xva_function
-                .statement
-                .push(XvaStatement::Expr(XvaExpr {
-                    dest: reg,
-                    dest2: None,
-                    op: XvaOpcode::Const(xva::XvaConst::Bits(val)),
-                }));
+            self.current_statements.push(XvaStatement::Expr(XvaExpr {
+                dest: reg,
+                dest2: None,
+                op: XvaOpcode::Const(xva::XvaConst::Bits(val)),
+            }));
         }
 
         let mut param_regs = Vec::new();
@@ -489,13 +535,11 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             CallConvLocation::Void => (CallConvLocation::Void, vec![]),
             CallConvLocation::Memory(reg) => {
                 if let Some(tc_ret_place) = tc_ret_place {
-                    self.xva_function
-                        .statement
-                        .push(XvaStatement::Expr(XvaExpr {
-                            dest: reg,
-                            dest2: None,
-                            op: XvaOpcode::Move(tc_ret_place),
-                        }));
+                    self.current_statements.push(XvaStatement::Expr(XvaExpr {
+                        dest: reg,
+                        dest2: None,
+                        op: XvaOpcode::Move(tc_ret_place),
+                    }));
                     (CallConvLocation::Registers(vec![reg]), vec![])
                 } else {
                     todo!("alloca for memory return")
@@ -508,6 +552,140 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
         };
 
         (param_regs, ret_place, ret_regs, info.volatile_registers)
+    }
+
+    fn lower_intrin_call(&mut self, intrin: &IntrinsicCall<'ir>, tailcall: bool) -> XvaRegister {
+        let IntrinsicCall {
+            target,
+            sig,
+            call_metadata: _,
+            const_params,
+            params,
+        } = intrin;
+        let ty = sig.ret_ty(self.constants);
+        let layout = layout_type(ty, self.constants, self.target);
+
+        let xva_ty = layout.xva_type();
+
+        let (dest, did_return) = match target {
+            Intrinsic::Arch(arch, name) => {
+                let arch = arch.get(self.constants);
+                if &self.target.arch.name == arch.as_str()
+                    || self
+                        .target
+                        .arch
+                        .alias_names
+                        .iter()
+                        .any(|v| v == arch.as_str())
+                {
+                    let param_regs = params
+                        .iter()
+                        .map(|v| {
+                            let ty = v.ty();
+                            let layout = layout_type(ty, self.constants, self.target);
+
+                            let xva_ty = layout.xva_type();
+
+                            XvaRegister::Virtual(XvaDest {
+                                id: self.vreg_num.fetch_inc(),
+                                ty: xva_ty,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    let mut statements = Vec::new();
+                    (
+                        self.compiler
+                            .lower_intrinsic_call(
+                                name.get(self.constants),
+                                const_params,
+                                &param_regs,
+                                &mut statements,
+                                self.constants,
+                                xva_ty,
+                                &mut |ty| {
+                                    XvaRegister::Virtual(XvaDest {
+                                        id: self.vreg_num.fetch_inc(),
+                                        ty,
+                                    })
+                                },
+                            )
+                            .expect("Intrinsic Lowering Failed"),
+                        false,
+                    )
+                } else {
+                    panic!("Wrong architecture {arch}");
+                }
+            }
+            Intrinsic::BlackBox => {
+                let reg = XvaRegister::Virtual(XvaDest {
+                    id: self.vreg_num.fetch_inc(),
+                    ty: xva_ty,
+                });
+                match &params[..] {
+                    [param] => {
+                        self.lower_expr(reg, param);
+
+                        let gate_no = self.opt_gate_num.fetch_inc();
+
+                        self.current_statements.push(XvaStatement::OptGate(
+                            BarrierKind::PROPAGATE_THROUGH | BarrierKind::ELIDE_REGISTERS,
+                            gate_no,
+                        ));
+
+                        let dest = XvaRegister::Virtual(XvaDest {
+                            id: self.vreg_num.fetch_inc(),
+                            ty: xva_ty,
+                        });
+
+                        self.current_statements.push(XvaStatement::Expr(XvaExpr {
+                            dest,
+                            dest2: None,
+                            op: XvaOpcode::Move(reg),
+                        }));
+
+                        self.current_statements
+                            .push(XvaStatement::EndOptGate(gate_no));
+                        (dest, false)
+                    }
+                    _ => panic!("Invalid signature for lxca::generic::hint::black_box"),
+                }
+            }
+            Intrinsic::SpinLoop => {
+                let reg = XvaRegister::Virtual(XvaDest {
+                    id: self.vreg_num.fetch_inc(),
+                    ty: xva_ty,
+                });
+                self.current_statements
+                    .push(XvaStatement::Noop(xva::NoopKind::PauseHint));
+                self.current_statements.push(XvaStatement::Expr(XvaExpr {
+                    dest: reg,
+                    dest2: None,
+                    op: XvaOpcode::Uninit,
+                }));
+                (reg, false)
+            }
+            _ => todo!("Unknown intrinsic"),
+        };
+
+        if !did_return && tailcall {
+            match &self.info.as_ref().unwrap().return_loc {
+                crate::callconv::CallConvLocation::Void => {}
+                crate::callconv::CallConvLocation::Registers(regs) => match &**regs {
+                    [] => {}
+                    [reg] => {
+                        self.current_statements.push(XvaStatement::Expr(XvaExpr {
+                            dest: *reg,
+                            dest2: None,
+                            op: XvaOpcode::Move(dest),
+                        }));
+                    }
+                    _ => todo!("multiple registers"),
+                },
+                _ => unreachable!("Memory checked"),
+            }
+        }
+
+        dest
     }
 
     fn lower_jump(
@@ -547,13 +725,11 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 }
             };
 
-            self.xva_function
-                .statement
-                .push(XvaStatement::Expr(XvaExpr {
-                    dest,
-                    dest2: None,
-                    op: expr,
-                }));
+            self.current_statements.push(XvaStatement::Expr(XvaExpr {
+                dest,
+                dest2: None,
+                op: expr,
+            }));
         }
 
         let label = format!(
@@ -562,16 +738,14 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             targ.target.get(self.constants)
         );
 
-        self.xva_function
-            .statement
+        self.current_statements
             .push(XvaStatement::Jump(cmli::intern::Symbol::intern(label)));
     }
 
     fn lower_term(&mut self, stmt: &Terminator<'ir>) {
         match &stmt.body {
             lxca::ir::expr::TerminatorBody::Unreachable => self
-                .xva_function
-                .statement
+                .current_statements
                 .push(XvaStatement::Trap(cmli::xva::XvaTrap::Unreachable)),
             lxca::ir::expr::TerminatorBody::Jump(targ) => {
                 self.lower_jump(targ, None);
@@ -581,7 +755,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 let (param_regs, ret_place, ret_regs, volatile_regs) =
                     self.prep_function_call(&call_term.func, None);
 
-                self.xva_function.statement.push(XvaStatement::Call {
+                self.current_statements.push(XvaStatement::Call {
                     dest,
                     params: param_regs,
                     ret_val: ret_regs,
@@ -616,7 +790,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                         ty: xva_ty,
                     });
                     self.lower_expr(dest, expr);
-                    self.xva_function.statement.push(XvaStatement::Write(
+                    self.current_statements.push(XvaStatement::Write(
                         cmli::xva::XvaOperand::Register(val),
                         dest,
                     ));
@@ -634,8 +808,26 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                     }
                 }
 
-                self.xva_function.statement.push(XvaStatement::Return);
+                self.current_statements.push(XvaStatement::Return);
             }
+            lxca::ir::expr::TerminatorBody::CallIntrinsic(call) => {
+                let reg = self.lower_intrin_call(&call.func, false);
+
+                self.lower_jump(
+                    &call.next,
+                    Some((
+                        CallConvLocation::Registers(vec![reg]),
+                        reg.ty(
+                            self.compiler.compiler().machine(),
+                            self.compiler.machine_mode(),
+                        ),
+                    )),
+                );
+            }
+            lxca::ir::expr::TerminatorBody::TailcallIntrinsic(intrin) => {
+                self.lower_intrin_call(intrin, true);
+            }
+            _ => todo!(),
         }
     }
 
@@ -650,11 +842,29 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
 
         self.cur_label = Some(bb.label());
 
+        let live_at_start = bb
+            .params()
+            .iter()
+            .map(|(v, _)| v)
+            .filter_map(|v| self.local_vars.get(&bb.label()).and_then(|bb| bb.get(v)))
+            .copied()
+            .collect();
+
         for stmt in bb.stmts() {
             self.lower_stmt(stmt);
         }
 
         self.lower_term(bb.term());
+
+        let block = core::mem::take(&mut self.current_statements);
+
+        let block = XvaBasicBlock {
+            label,
+            live_at_start,
+            body: xva::XvaBlockBody::Statement(block),
+        };
+
+        self.xva_function.body.push(block);
     }
 
     fn lower_function(&mut self, func: &FunctionBody<'ir>) {
