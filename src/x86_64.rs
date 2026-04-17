@@ -138,7 +138,6 @@ impl CallConvSpec for X86_64Abi {
     ) {
         let total_fragments = (bits + 63) >> 6;
         let mut total_len = (bits + 7) >> 3;
-        eprintln!("int({bits} = {total_len} bytes");
         for x in 0..total_fragments {
             let frag_base = (x * 8) as u32;
             let len = total_len.min(8);

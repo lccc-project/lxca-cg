@@ -280,7 +280,7 @@ fn classify_ty<'ir>(
     let mut frag_array = Vec::new();
     let mut extent_array = Vec::new();
     match ty.body(pool) {
-        lxca::ir::types::TypeBody::Interned(constant) => todo!(),
+        lxca::ir::types::TypeBody::Interned(constant) => unreachable!(),
         lxca::ir::types::TypeBody::Named(constant) => todo!("named type"),
         lxca::ir::types::TypeBody::Integer(int_type) => {
             spec.classify_int(int_type.width, info, |frag, base, len| {
@@ -299,7 +299,7 @@ fn classify_ty<'ir>(
                 info.primitive_layout.int_layout.short_pointer_width,
                 info,
                 |frag, base, len| {
-                    frag_array.push((frag, base));
+                    frag_array.push((frag, len));
                     extent_array.push((base, len));
                 },
             );

@@ -1,4 +1,4 @@
-use cmli::xva::opt::{ALL_PASSES, run_passes};
+use cmli::xva::{opt::{ALL_PASSES, run_passes}, regalloc::RegAllocator};
 use lxca::ir::{
     self,
     test_files::{self, TEST_FILES},
@@ -34,13 +34,51 @@ fn main() {
         println!("xva:");
         println!("{}", file.pretty_print(mach, mode));
 
-        println!("optimized xva:");
+        let fuel = 100; // Treat this as a debug build, use 100 for now
+
+        // println!("optimized xva:");
         run_passes(
             ALL_PASSES.iter().copied(),
             cmli::xva::opt::XvaOptPhase::AfterLower,
             &mut file,
-            100,
+            fuel,
         ); // treat this as debug build, use 100 for now
+        // println!("{}", file.pretty_print(mach, mode));
+
+        run_passes(
+            ALL_PASSES.iter().copied(),
+            cmli::xva::opt::XvaOptPhase::BeforeRegalloc,
+            &mut file,
+            fuel / 2,
+        ); 
+        for func in &mut file.functions {
+            let mut regallocer = RegAllocator::new(compiler.compiler(), &mut func.body);
+
+            regallocer.process_function();
+        }
+
+        run_passes(
+            ALL_PASSES.iter().copied(),
+            cmli::xva::opt::XvaOptPhase::AfterRegalloc,
+            &mut file,
+            fuel / 2,
+        ); 
+
+        println!("regalloc xva:");
         println!("{}", file.pretty_print(mach, mode));
+
+        run_passes(
+            ALL_PASSES.iter().copied(),
+            cmli::xva::opt::XvaOptPhase::BeforeMce,
+            &mut file,
+            fuel / 2,
+        );
+
+        file.lower_mc(compiler.compiler(), compiler.machine_mode());
+
+        println!("mce:");
+        println!("{}", file.pretty_print(mach, mode));
+
+
     }
 }

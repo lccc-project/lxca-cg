@@ -4,9 +4,7 @@ use cmli::{
     compiler::Compiler,
     mach::MachineMode,
     xva::{
-        self, BarrierKind, Linkage, XvaBasicBlock, XvaCategory, XvaDest, XvaExpr, XvaFile,
-        XvaFunction, XvaFunctionDef, XvaObjectDef, XvaOpcode, XvaOperand, XvaRegister,
-        XvaStatement, XvaType,
+        self, BarrierKind, Linkage, XvaBasicBlock, XvaCategory, XvaDest, XvaExpr, XvaFile, XvaFrameProperties, XvaFunction, XvaFunctionDef, XvaObjectDef, XvaOpcode, XvaOperand, XvaRegister, XvaStatement, XvaType
     },
 };
 use indexmap::{IndexMap, IndexSet};
@@ -88,11 +86,15 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 preserve_regs: Vec::new(),
                 return_reg: Vec::new(),
                 body: Vec::new(),
-                frame_size: 0,
-                frame_align: 1,
-                call_align: 1,
-                call_align_offset: 0,
-                has_prologue: true,
+                frame_properties: XvaFrameProperties{
+                    frame_size: 0,
+                    frame_align: 1,
+                    call_align: 1,
+                    call_align_offset: 0,
+                    has_prologue: true,
+                    ..XvaFrameProperties::new()
+                },
+                prologue: Vec::new(),
             },
             current_statements: Vec::new(),
             cc: None,
@@ -229,8 +231,8 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             }
         }
 
-        self.xva_function.call_align = info.stack_align as usize;
-        self.xva_function.call_align_offset = info.stack_offset_entry as usize;
+        self.xva_function.frame_properties.call_align = info.stack_align as usize;
+        self.xva_function.frame_properties.call_align_offset = info.stack_offset_entry as usize;
 
         self.info = Some(info);
     }
@@ -481,8 +483,8 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             .compute_call_conv(Some(call_sig), fn_sig, self.constants, self.target)
             .unwrap();
 
-        self.xva_function.frame_align =
-            self.xva_function.frame_align.max(info.stack_align as usize); // Todo slide adjustment
+        self.xva_function.frame_properties.frame_align =
+            self.xva_function.frame_properties.frame_align.max(info.stack_align as usize); // Todo slide adjustment
 
         for (reg, val) in info.extra_sets {
             self.current_statements.push(XvaStatement::Expr(XvaExpr {
