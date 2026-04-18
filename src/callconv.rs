@@ -1,6 +1,5 @@
 use cmli::{
-    compiler::{Compiler, CompilerContext},
-    xva::XvaRegister,
+    compiler::{Compiler, CompilerContext}, mach::Register, xva::XvaRegister
 };
 use lccc_targets::properties::target::Target;
 use lxca::ir::{
@@ -18,20 +17,20 @@ pub struct CallConvInfo {
     /// The list of locations of each real parameter (after expanding varargs)
     pub param_map: Vec<CallConvLocation>,
     /// Values which must be set in non-parameter registers before the call is performed.
-    pub extra_sets: Vec<(XvaRegister, u64)>,
+    pub extra_sets: Vec<(Register, u64)>,
     /// The location where the return value is stored.
     pub return_loc: CallConvLocation,
     /// The register to return the return place pointer
-    pub return_place: Option<XvaRegister>,
+    pub return_place: Option<Register>,
     /// The Set of registers that are volatile, IE. may be used by the callee without being preserved.
     /// The Caller is responsible for saving these registers as it needs the preserve their values accross a call.
-    pub volatile_registers: Vec<XvaRegister>,
+    pub volatile_registers: Vec<Register>,
     /// The set of non-volatile registers, IE. may be used by the callee, but are guaranteed to preserve the value for the caller.
     /// The Calee is responsible for saving these registers as it needs them.
     ///
     /// The set of all other registers (neither in [`CallConvInfo::volatile_registers`] nor [`CallConvInfo::preserved_registers`]) are reserved.
     /// They generally cannot be used, or have external abi stability requirements that apply on descended calls as well.
-    pub preserved_registers: Vec<XvaRegister>,
+    pub preserved_registers: Vec<Register>,
 
     /// The total size of the stack region to allocate before the call
     pub stack_param_area: u32,
@@ -51,10 +50,11 @@ pub struct CallConvInfo {
 pub enum CallConvLocation {
     #[default]
     Void,
-    Registers(Vec<XvaRegister>),
+    Registers(Vec<Register>),
     Stack(Range<u64>),
-    Memory(XvaRegister),
+    Memory(Register),
     StackMemory(Range<u64>),
+    VReg(XvaRegister),
 }
 
 pub trait CallConv {
@@ -119,9 +119,9 @@ pub trait CallConvSpec {
         frags: &[(ParameterFragmentClass, u32)],
         state: &mut Self::AssignParamsState<'_>,
         is_varargs: bool,
-    ) -> Option<Vec<XvaRegister>>;
+    ) -> Option<Vec<Register>>;
 
-    fn assign_registers_return(&self, frags: &[(ParameterFragmentClass, u32)]) -> Vec<XvaRegister>;
+    fn assign_registers_return(&self, frags: &[(ParameterFragmentClass, u32)]) -> Vec<Register>;
 
     /// If the return place parameter is returned for a given set of fragments specify the class of that return value
     fn return_return_place(
@@ -129,15 +129,15 @@ pub trait CallConvSpec {
         frag: &[(ParameterFragmentClass, u32)],
     ) -> Option<(ParameterFragmentClass, u32)>;
 
-    fn volatile_registers(&self) -> Vec<XvaRegister>;
+    fn volatile_registers(&self) -> Vec<Register>;
 
-    fn non_volatile_registers(&self) -> Vec<XvaRegister>;
+    fn non_volatile_registers(&self) -> Vec<Register>;
 
     fn add_assigns(
         &self,
         state: &Self::AssignParamsState<'_>,
         is_varargs: bool,
-    ) -> Vec<(XvaRegister, u64)>;
+    ) -> Vec<(Register, u64)>;
 
     fn shadow_space(&self, state: &Self::AssignParamsState<'_>) -> u32;
     fn redzone(&self, state: &Self::AssignParamsState<'_>) -> u32;

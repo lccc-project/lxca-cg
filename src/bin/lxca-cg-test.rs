@@ -42,6 +42,8 @@ fn main() {
             cmli::xva::opt::XvaOptPhase::AfterLower,
             &mut file,
             fuel,
+            mach,
+            mode
         ); // treat this as debug build, use 100 for now
         // println!("{}", file.pretty_print(mach, mode));
 
@@ -50,6 +52,8 @@ fn main() {
             cmli::xva::opt::XvaOptPhase::BeforeRegalloc,
             &mut file,
             fuel / 2,
+            mach,
+            mode
         ); 
         for func in &mut file.functions {
             let mut regallocer = RegAllocator::new(compiler.compiler(), &mut func.body);
@@ -62,6 +66,8 @@ fn main() {
             cmli::xva::opt::XvaOptPhase::AfterRegalloc,
             &mut file,
             fuel / 2,
+            mach,
+            mode
         ); 
 
         println!("regalloc xva:");
@@ -72,6 +78,8 @@ fn main() {
             cmli::xva::opt::XvaOptPhase::BeforeMce,
             &mut file,
             fuel / 2,
+            mach,
+            mode,
         );
 
         file.lower_mc(compiler.compiler(), compiler.machine_mode());

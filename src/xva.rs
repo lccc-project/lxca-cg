@@ -2,7 +2,7 @@ use std::{collections::HashMap, hash::BuildHasher, ops::Index};
 
 use cmli::{
     compiler::Compiler,
-    mach::MachineMode,
+    mach::{MachineMode, Register, Regset},
     xva::{
         self, BarrierKind, Linkage, XvaBasicBlock, XvaCategory, XvaDest, XvaExpr, XvaFile, XvaFrameProperties, XvaFunction, XvaFunctionDef, XvaObjectDef, XvaOpcode, XvaOperand, XvaRegister, XvaStatement, XvaType
     },
@@ -82,9 +82,10 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             target,
             local_vars: IndexMap::new(),
             xva_function: XvaFunction {
-                params: Vec::new(),
-                preserve_regs: Vec::new(),
-                return_reg: Vec::new(),
+                params: Regset::new(),
+                preserve_regs: Regset::new(),
+                clobber_regs: Regset::new(),
+                return_regs: Regset::new(),
                 body: Vec::new(),
                 frame_properties: XvaFrameProperties{
                     frame_size: 0,
@@ -112,6 +113,11 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
     fn lower_cc(&mut self, sig: &Signature<'ir>, param_names: &[Constant<'ir, Symbol>]) {
         let callconv = self.compiler.call_conv();
 
+        let mode = self.compiler.machine_mode();
+
+        let compiler = self.compiler.compiler();
+        let mach = compiler.machine();
+
         self.cc = Some(callconv);
 
         let info = callconv
@@ -120,14 +126,15 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
 
         self.xva_function
             .preserve_regs
-            .extend_from_slice(&info.preserved_registers);
+            .insert_registers(&info.preserved_registers, mach);
+
+        self.xva_function
+            .clobber_regs
+            .insert_registers(&info.volatile_registers, mach);
 
         let tys = sig.params(self.constants);
 
-        let mode = self.compiler.machine_mode();
-
-        let compiler = self.compiler.compiler();
-        let mach = compiler.machine();
+        
 
         for (n, param) in info.param_map.iter().enumerate() {
             let is_param = info.lxca_param_range.contains(&n);
@@ -157,8 +164,10 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
 
                     reg
                 }
-                crate::callconv::CallConvLocation::Registers(xva_regs) => {
-                    self.xva_function.params.extend_from_slice(xva_regs);
+                crate::callconv::CallConvLocation::Registers(regs) => {
+                    self.xva_function.params.insert_registers(regs, mach);
+
+                    let xva_regs = regs.iter().map(|v| XvaRegister::Physical(*v)).collect::<Vec<_>>();
 
                     let size =
                         size.unwrap_or_else(|| xva_regs.iter().map(|v| v.size(mach, mode)).sum());
@@ -193,6 +202,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 crate::callconv::CallConvLocation::StackMemory(range) => {
                     todo!("stack memory {range:?}")
                 }
+                CallConvLocation::VReg(_) => panic!("Cannot use VReg in a real cc")
             };
 
             if is_param {
@@ -204,12 +214,13 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
         match &info.return_loc {
             crate::callconv::CallConvLocation::Void => {}
             crate::callconv::CallConvLocation::Registers(regs) => {
-                self.xva_function.return_reg.extend_from_slice(regs);
+                self.xva_function.return_regs.insert_registers(regs, mach);
             }
             crate::callconv::CallConvLocation::Stack(_) => {
                 panic!("Cannot return directly on the stack")
             }
             crate::callconv::CallConvLocation::Memory(reg) => {
+                let reg = XvaRegister::Physical(*reg);
                 let ret_ptr: XvaRegister = XvaRegister::Virtual(XvaDest {
                     id: self.vreg_num.fetch_inc(),
                     ty: reg.ty(mach, mode),
@@ -219,16 +230,17 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 self.current_statements.push(XvaStatement::Expr(XvaExpr {
                     dest: ret_ptr,
                     dest2: None,
-                    op: XvaOpcode::Move(*reg),
+                    op: XvaOpcode::Move(reg),
                 }));
 
                 if let Some(v) = info.return_place {
-                    self.xva_function.return_reg.push(v);
+                    self.xva_function.return_regs.insert_register(v, mach);
                 }
             }
             crate::callconv::CallConvLocation::StackMemory(_) => {
                 panic!("Cannot return directly on the stack")
             }
+            CallConvLocation::VReg(_) => panic!("Cannot use VReg in a real cc")
         }
 
         self.xva_function.frame_properties.call_align = info.stack_align as usize;
@@ -460,10 +472,10 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
         func: &FunctionCall<'ir>,
         tc_ret_place: Option<XvaRegister>,
     ) -> (
-        Vec<XvaRegister>,
+        Vec<Register>,
         CallConvLocation,
-        Vec<XvaRegister>,
-        Vec<XvaRegister>,
+        Vec<Register>,
+        Vec<Register>,
     ) {
         let call_sig = &func.sig;
         let fn_sig = match func.target.ty().body(self.constants) {
@@ -488,7 +500,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
 
         for (reg, val) in info.extra_sets {
             self.current_statements.push(XvaStatement::Expr(XvaExpr {
-                dest: reg,
+                dest: XvaRegister::Physical(reg),
                 dest2: None,
                 op: XvaOpcode::Const(xva::XvaConst::Bits(val)),
             }));
@@ -522,7 +534,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                             self.lower_expr(dest, param_val);
                         }
                         [reg] => {
-                            self.lower_expr(*reg, param_val);
+                            self.lower_expr(XvaRegister::Physical(*reg), param_val);
                         }
                         [..] => todo!("Multiple registers"),
                     }
@@ -530,6 +542,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 CallConvLocation::Stack(range) => todo!("push to stack"),
                 CallConvLocation::Memory(xva_register) => todo!("memory"),
                 CallConvLocation::StackMemory(range) => todo!("stack memory"),
+                CallConvLocation::VReg(_) => panic!("Virtual register not allowed for real function calls")
             }
         }
 
@@ -538,7 +551,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             CallConvLocation::Memory(reg) => {
                 if let Some(tc_ret_place) = tc_ret_place {
                     self.current_statements.push(XvaStatement::Expr(XvaExpr {
-                        dest: reg,
+                        dest: XvaRegister::Physical(reg),
                         dest2: None,
                         op: XvaOpcode::Move(tc_ret_place),
                     }));
@@ -551,6 +564,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
 
             CallConvLocation::StackMemory(_) => todo!("stack memory"),
             CallConvLocation::Stack(_) => panic!("Cannot return directly on the stack"),
+            CallConvLocation::VReg(_) => panic!("Virtual register not allowed for real function calls")
         };
 
         (param_regs, ret_place, ret_regs, info.volatile_registers)
@@ -676,7 +690,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                     [] => {}
                     [reg] => {
                         self.current_statements.push(XvaStatement::Expr(XvaExpr {
-                            dest: *reg,
+                            dest: XvaRegister::Physical(*reg),
                             dest2: None,
                             op: XvaOpcode::Move(dest),
                         }));
@@ -710,9 +724,10 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                     (CallConvLocation::Void, _) => XvaOpcode::Uninit,
                     (CallConvLocation::Registers(regs), _xva_ty) => match &*regs {
                         [] => XvaOpcode::Uninit,
-                        [reg] => XvaOpcode::Move(*reg),
+                        [reg] => XvaOpcode::Move(XvaRegister::Physical(*reg)),
                         [..] => todo!("Multiple registers"),
                     },
+                    (CallConvLocation::VReg(vreg), _xva_ty) => XvaOpcode::Move(vreg),
                     (_loc, _xva_ty) => todo!("memory"),
                 },
                 _ => {
@@ -745,6 +760,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
     }
 
     fn lower_term(&mut self, stmt: &Terminator<'ir>) {
+        let mach = self.compiler.compiler().machine();
         match &stmt.body {
             lxca::ir::expr::TerminatorBody::Unreachable => self
                 .current_statements
@@ -759,9 +775,9 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
 
                 self.current_statements.push(XvaStatement::Call {
                     dest,
-                    params: param_regs,
-                    ret_val: ret_regs,
-                    call_clobber_regs: volatile_regs,
+                    params: Regset::from_registers(param_regs, mach),
+                    ret_val: Regset::from_registers(ret_regs, mach),
+                    call_clobber_regs: Regset::from_registers(volatile_regs, mach),
                 });
 
                 let ret_layout = layout_type(
@@ -802,7 +818,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                         crate::callconv::CallConvLocation::Registers(regs) => match &**regs {
                             [] => {}
                             [reg] => {
-                                self.lower_expr(*reg, expr);
+                                self.lower_expr(XvaRegister::Physical(*reg), expr);
                             }
                             _ => todo!("multiple registers"),
                         },
@@ -818,7 +834,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 self.lower_jump(
                     &call.next,
                     Some((
-                        CallConvLocation::Registers(vec![reg]),
+                        CallConvLocation::VReg(reg),
                         reg.ty(
                             self.compiler.compiler().machine(),
                             self.compiler.machine_mode(),

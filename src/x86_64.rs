@@ -8,6 +8,7 @@ use cmli::{
     traits::IdType as _,
     x86_registers,
     xva::XvaRegister,
+    mach::Register,
 };
 use lccc_targets::properties::{ExtPropertyValue, target::Target};
 
@@ -155,12 +156,12 @@ impl CallConvSpec for X86_64Abi {
         frags: &[(ParameterFragmentClass, u32)],
         state: &mut Self::AssignParamsState<'_>,
         _: bool,
-    ) -> Option<Vec<cmli::xva::XvaRegister>> {
+    ) -> Option<Vec<Register>> {
         match frags {
             [(ParameterFragmentClass::Integer, len)] => {
                 let reg = state.next_greg(*self)?;
 
-                Some(vec![XvaRegister::physical(
+                Some(vec![Register::new(
                     reg.promote_gpr(GprSize::from_size(*len)),
                 )])
             }
@@ -176,14 +177,14 @@ impl CallConvSpec for X86_64Abi {
                 };
 
                 Some(vec![
-                    XvaRegister::physical(reg1.promote_gpr(GprSize::from_size(*len1))),
-                    XvaRegister::physical(reg2.promote_gpr(GprSize::from_size(*len2))),
+                    Register::new(reg1.promote_gpr(GprSize::from_size(*len1))),
+                    Register::new(reg2.promote_gpr(GprSize::from_size(*len2))),
                 ])
             }
             [(ParameterFragmentClass::Vector, _)] => {
                 let reg = state.next_vreg(*self)?;
 
-                Some(vec![XvaRegister::physical(reg)])
+                Some(vec![Register::new(reg)])
             }
             [
                 (ParameterFragmentClass::Vector, _),
@@ -200,7 +201,7 @@ impl CallConvSpec for X86_64Abi {
 
                 let reg = xmm.promote_xmm(sz);
 
-                Some(vec![XvaRegister::physical(reg)])
+                Some(vec![Register::new(reg)])
             }
             [
                 (ParameterFragmentClass::Vector, _),
@@ -214,8 +215,8 @@ impl CallConvSpec for X86_64Abi {
                 };
 
                 Some(vec![
-                    XvaRegister::physical(reg1),
-                    XvaRegister::physical(reg2),
+                    Register::new(reg1),
+                    Register::new(reg2),
                 ])
             }
             [
@@ -229,8 +230,8 @@ impl CallConvSpec for X86_64Abi {
                     return None;
                 };
                 Some(vec![
-                    XvaRegister::physical(reg1.promote_gpr(GprSize::from_size(*len))),
-                    XvaRegister::physical(reg2),
+                    Register::new(reg1.promote_gpr(GprSize::from_size(*len))),
+                    Register::new(reg2),
                 ])
             }
             [
@@ -244,8 +245,8 @@ impl CallConvSpec for X86_64Abi {
                     return None;
                 };
                 Some(vec![
-                    XvaRegister::physical(reg1),
-                    XvaRegister::physical(reg2.promote_gpr(GprSize::from_size(*len))),
+                    Register::new(reg1),
+                    Register::new(reg2.promote_gpr(GprSize::from_size(*len))),
                 ])
             }
             _ => unreachable!(),
@@ -345,7 +346,7 @@ impl CallConvSpec for X86_64Abi {
     fn assign_registers_return(
         &self,
         frags: &[(ParameterFragmentClass, u32)],
-    ) -> Vec<cmli::xva::XvaRegister> {
+    ) -> Vec<Register> {
         let mut regs = Vec::with_capacity(frags.len().min(2));
 
         // Special Cases
@@ -365,13 +366,13 @@ impl CallConvSpec for X86_64Abi {
 
                 let reg = xmm.promote_xmm(sz);
 
-                regs.push(XvaRegister::physical(reg))
+                regs.push(Register::new(reg))
             }
             [
                 (ParameterFragmentClass::ScalarFloat, _),
                 (ParameterFragmentClass::Extension, _),
             ] => {
-                regs.push(XvaRegister::physical(X86Register::St(0)));
+                regs.push(Register::new(X86Register::St(0)));
             }
             [
                 (ParameterFragmentClass::ScalarFloat, _),
@@ -379,18 +380,18 @@ impl CallConvSpec for X86_64Abi {
                 (ParameterFragmentClass::Extension, _),
                 (ParameterFragmentClass::Extension, _),
             ] => {
-                regs.push(XvaRegister::physical(X86Register::St(0)));
-                regs.push(XvaRegister::physical(X86Register::St(1)));
+                regs.push(Register::new(X86Register::St(0)));
+                regs.push(Register::new(X86Register::St(1)));
             }
             frags => {
                 for (i, frag) in frags.iter().enumerate() {
                     match frag {
-                        (ParameterFragmentClass::Integer, len) => regs.push(XvaRegister::physical(
+                        (ParameterFragmentClass::Integer, len) => regs.push(Register::new(
                             x86_registers![rax, rdx][i].promote_gpr(GprSize::from_size(*len)),
                         )),
 
                         (ParameterFragmentClass::Vector, _) => {
-                            regs.push(XvaRegister::physical(x86_registers![xmm0, xmm1][i]))
+                            regs.push(Register::new(x86_registers![xmm0, xmm1][i]))
                         }
                         (
                             ParameterFragmentClass::ScalarFloat
@@ -414,7 +415,7 @@ impl CallConvSpec for X86_64Abi {
         None // return place is never returned
     }
 
-    fn non_volatile_registers(&self) -> Vec<XvaRegister> {
+    fn non_volatile_registers(&self) -> Vec<Register> {
         let regs: &[X86Register] = match self {
             X86_64Abi::SysV => &x86_registers![rbx, rbp, r12, r13, r14, r15],
             X86_64Abi::Msabi | X86_64Abi::Vectorcall => {
@@ -424,11 +425,11 @@ impl CallConvSpec for X86_64Abi {
 
         regs.iter()
             .copied()
-            .map(|v| XvaRegister::physical(v))
+            .map(|v| Register::new(v))
             .collect()
     }
 
-    fn volatile_registers(&self) -> Vec<XvaRegister> {
+    fn volatile_registers(&self) -> Vec<Register> {
         let regs: &[X86Register] = match self {
             X86_64Abi::SysV => &x86_registers![
                 rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, r16, r17, r18, r19, r20, r21, r22, r23,
@@ -450,16 +451,16 @@ impl CallConvSpec for X86_64Abi {
 
         regs.iter()
             .copied()
-            .map(|v| XvaRegister::physical(v))
+            .map(|v| Register::new(v))
             .collect()
     }
 
-    fn add_assigns(&self, state: &X86_64AbiState<'_>, is_varargs: bool) -> Vec<(XvaRegister, u64)> {
+    fn add_assigns(&self, state: &X86_64AbiState<'_>, is_varargs: bool) -> Vec<(Register, u64)> {
         match self {
             X86_64Abi::SysV => {
                 if is_varargs {
                     vec![(
-                        XvaRegister::physical(X86Register::Byte(0)),
+                        Register::new(X86Register::Byte(0)),
                         state.vreg_pos as u64,
                     )]
                 } else {
