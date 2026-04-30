@@ -6,8 +6,8 @@ edition = "2024"
 [dependencies]
 cmli = { path = "cmli", default-features = false }
 lxca = { git = "https://github.com/lccc-project/lxca" }
-lccc-targets = { git = "https://github.com/lccc-project/lccc-target" }
-target-tuples = { version = "0.16.0" }
+lccc-targets = { path = "lccc-target" }
+target-tuples = { version = "0.16.1" }
 indexmap = "2.13.0"
 lccc-siphash = { git = "https://github.com/lccc-project/lccc-siphash", version = "0.1.0", features = [
     "random-state",
@@ -16,11 +16,13 @@ lccc-siphash = { git = "https://github.com/lccc-project/lccc-siphash", version =
 [features]
 x86 = ["cmli/x86"]
 x86_64 = ["x86"]
-test-files = ["lxca/test-files"]
+skyarch = ["cmli/skyarch"]
 
 default-archs = ["x86"]
-all-archs = ["default-archs"]
+all-archs = ["default-archs", "skyarch"]
 default = ["default-archs"]
+
+test-files = ["lxca/test-files"]
 
 
 [[bin]]

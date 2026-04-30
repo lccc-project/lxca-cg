@@ -1,3 +1,6 @@
 [submodule "cmli"]
 	path = cmli
 	url = https://github.com/lccc-project/cmli.git
+[submodule "lccc-target"]
+	path = lccc-target
+	url = https://github.com/lccc-project/lccc-target.git

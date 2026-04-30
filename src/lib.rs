@@ -6,6 +6,9 @@ pub mod x86;
 #[cfg(feature = "x86_64")]
 pub mod x86_64;
 
+#[cfg(feature = "skyarch")]
+pub mod skyarch;
+
 pub mod helpers;
 
 pub mod xva;

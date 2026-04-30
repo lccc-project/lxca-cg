@@ -10,25 +10,30 @@ use lxca_cg::{
 use target_tuples::TargetRef;
 
 fn main() {
-    let compiler = X86_64Compiler;
+    let mut args = std::env::args();
+    let prg_name = args.next().unwrap();
+    let target_name = args.next().unwrap_or_else(|| String::from("x86_64-pc-linux-gnu"));
+    let target = TargetRef::parse(&target_name);
+
+    let compiler = lxca_cg::xva::compiler_from_target(target).unwrap();
+
 
     let mach = compiler.compiler().machine();
 
-    let target_name = "x86_64-pc-linux-gnu";
     let mode = compiler.machine_mode();
 
     let target =
-        lccc_targets::builtin::target::from_target(&TargetRef::parse(target_name)).unwrap();
+        lccc_targets::builtin::target::from_target(&target).unwrap();
 
     for &(name, test) in TEST_FILES {
         println!("{name}:");
         let mut file = ir::with_context(|ctx| {
-            let file = test(target_name, ctx);
+            let file = test(&target_name, ctx);
 
             println!("lxca ir:");
             println!("{file}");
 
-            lower_lxca(&file, &target, &compiler)
+            lower_lxca(&file, &target, compiler)
         });
 
         println!("xva:");

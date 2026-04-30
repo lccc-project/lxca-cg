@@ -21,6 +21,9 @@ use lxca::ir::{
     symbol::Symbol,
     types::Signature,
 };
+use target_tuples::TargetRef;
+use target_tuples::pieces::Architecture;
+
 
 use crate::{
     callconv::{CallConv, CallConvInfo, CallConvLocation},
@@ -93,6 +96,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                     call_align: 1,
                     call_align_offset: 0,
                     has_prologue: true,
+                    is_leaf: true,
                     ..XvaFrameProperties::new()
                 },
                 prologue: Vec::new(),
@@ -769,6 +773,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 self.lower_jump(targ, None);
             }
             lxca::ir::expr::TerminatorBody::Call(call_term) => {
+                self.xva_function.frame_properties.is_leaf = false;
                 let dest = self.lower_expr_as_operand(&call_term.func.target);
                 let (param_regs, ret_place, ret_regs, volatile_regs) =
                     self.prep_function_call(&call_term.func, None);
@@ -810,6 +815,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                     self.lower_expr(dest, expr);
                     self.current_statements.push(XvaStatement::Write(
                         cmli::xva::XvaOperand::Register(val),
+                        xva_ty,
                         dest,
                     ));
                 } else {
@@ -1002,4 +1008,12 @@ pub fn lower_lxca<'ir>(file: &File<'ir>, target: &Target, compiler: &dyn XvaComp
     }
 
     xva_file
+}
+
+pub fn compiler_from_target(target: TargetRef) -> Option<&'static dyn XvaCompiler> {
+    match target.canonical().arch {
+        #[cfg(feature = "x86_64")] Architecture::X86_64 { .. } => Some(&crate::x86_64::X86_64Compiler),
+        #[cfg(feature = "skyarch")] Architecture::Skyarch => Some(&crate::skyarch::SkyarchCompiler),
+        _ => None
+    }
 }
