@@ -164,6 +164,7 @@ dependencies = [
 name = "lxca-cg"
 version = "0.1.0"
 dependencies = [
+ "bitflags",
  "cmli",
  "indexmap",
  "lccc-siphash",

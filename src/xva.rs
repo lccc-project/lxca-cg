@@ -1,15 +1,13 @@
-use std::{collections::HashMap, hash::BuildHasher, ops::Index};
+use std::{collections::{HashMap, HashSet}, hash::BuildHasher, ops::Index};
 
 use cmli::{
-    compiler::Compiler,
-    mach::{MachineMode, Register, Regset},
-    xva::{
+    compiler::{Compiler, CompilerContext}, instr::AddressKind, mach::{FeatureSet, MachineMode, Register, Regset}, xva::{
         self, BarrierKind, Linkage, XvaBasicBlock, XvaCategory, XvaDest, XvaExpr, XvaFile, XvaFrameProperties, XvaFunction, XvaFunctionDef, XvaObjectDef, XvaOpcode, XvaOperand, XvaRegister, XvaStatement, XvaType
-    },
+    }
 };
 use indexmap::{IndexMap, IndexSet};
 use lccc_siphash::{RawSipHasher, build::RandomState};
-use lccc_targets::properties::target::Target;
+use lccc_targets::properties::{arch::Machine, target::Target};
 use lxca::ir::{
     constant::{Constant, ConstantPool},
     decls::{DeclarationBody, FunctionBody},
@@ -28,7 +26,7 @@ use target_tuples::pieces::Architecture;
 use crate::{
     callconv::{CallConv, CallConvInfo, CallConvLocation},
     helpers::FetchIncrement,
-    layout::layout_type,
+    layout::layout_type, target::{AddressKinds, CgFlags},
 };
 
 pub type IntrinsicError = ();
@@ -39,6 +37,54 @@ pub trait XvaCompiler {
     fn machine_mode(&self) -> MachineMode;
 
     fn compiler(&self) -> &dyn Compiler;
+
+    fn address_kinds(&self, flags: CgFlags) -> AddressKinds {
+        let global = if flags.contains(CgFlags::PIC) {
+            AddressKind::GotRel
+        } else {
+            AddressKind::Default
+        };
+
+        let global_call = if flags.contains(CgFlags::PIC)  {
+            if flags.contains(CgFlags::NO_PLT) {
+                AddressKind::GotRel
+            } else {
+                AddressKind::Plt
+            }
+        } else {
+            AddressKind::Default
+        };
+
+        let local = AddressKind::Default;
+
+        let tls = if flags.contains(CgFlags::TLS_DYNAMIC) {
+            if flags.contains(CgFlags::TLS_INIT_EXEC) {
+                AddressKind::DTpoff
+            } else {
+                AddressKind::TlsDesc
+            }
+        } else {
+            AddressKind::Tpoff
+        };
+
+        let local_tls = if flags.contains(CgFlags::TLS_DYNAMIC) {
+            if flags.contains(CgFlags::TLS_INIT_EXEC) {
+                AddressKind::DTpoff
+            } else {
+                AddressKind::LTlsDesc
+            }
+        } else {
+            AddressKind::Tpoff
+        };
+
+        AddressKinds {
+            global,
+            global_call,
+            local,
+            tls,
+            local_tls,
+        }
+    }
 
     #[allow(unused)]
     fn lower_intrinsic_call<'ir>(
@@ -73,13 +119,16 @@ struct XvaLowerer<'ir, 'a> {
 }
 
 impl<'ir, 'a> XvaLowerer<'ir, 'a> {
-    fn new(
+    fn new<S: AsRef<str>>(
         compiler: &'a (dyn XvaCompiler + 'a),
         target: &'a Target,
+        global_features: &HashSet<S>,
         constants: &'a ConstantPool<'ir>,
         name: Constant<'ir, Symbol>,
         strings: &'a mut DataMap,
     ) -> Self {
+
+        let features = FeatureSet::from_names(global_features, compiler.compiler().machine());
         Self {
             compiler,
             target,
@@ -97,6 +146,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                     call_align_offset: 0,
                     has_prologue: true,
                     is_leaf: true,
+                    features,
                     ..XvaFrameProperties::new()
                 },
                 prologue: Vec::new(),
@@ -950,7 +1000,7 @@ impl DataMap {
     }
 }
 
-pub fn lower_lxca<'ir>(file: &File<'ir>, target: &Target, compiler: &dyn XvaCompiler) -> XvaFile {
+pub fn lower_lxca<'ir, S: AsRef<str>>(file: &File<'ir>, target: &Target, features: &HashSet<S>, compiler: &dyn XvaCompiler) -> XvaFile {
     let mut xva_file = XvaFile {
         functions: Vec::new(),
         weak_decls: Vec::new(),
@@ -977,7 +1027,7 @@ pub fn lower_lxca<'ir>(file: &File<'ir>, target: &Target, compiler: &dyn XvaComp
                     continue; // TODO: Emit weak decl
                 }
 
-                let mut lowerer = XvaLowerer::new(compiler, target, file.pool(), name, &mut data);
+                let mut lowerer = XvaLowerer::new(compiler, target, features, file.pool(), name, &mut data);
                 lowerer.lower_function(func);
                 let func = XvaFunctionDef {
                     body: lowerer.xva_function,

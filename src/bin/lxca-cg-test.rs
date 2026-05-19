@@ -4,8 +4,7 @@ use lxca::ir::{
     test_files::{self, TEST_FILES},
 };
 use lxca_cg::{
-    x86_64::X86_64Compiler,
-    xva::{XvaCompiler, lower_lxca},
+    target::{CgFlags, create_context}, x86_64::X86_64Compiler, xva::{XvaCompiler, lower_lxca}
 };
 use target_tuples::TargetRef;
 
@@ -25,6 +24,8 @@ fn main() {
     let target =
         lccc_targets::builtin::target::from_target(&target).unwrap();
 
+    let mut global_feature = target.compile_target_features(None);
+
     for &(name, test) in TEST_FILES {
         println!("{name}:");
         let mut file = ir::with_context(|ctx| {
@@ -33,7 +34,7 @@ fn main() {
             println!("lxca ir:");
             println!("{file}");
 
-            lower_lxca(&file, &target, compiler)
+            lower_lxca(&file, &target, &global_feature, compiler)
         });
 
         println!("xva:");
@@ -87,7 +88,9 @@ fn main() {
             mode,
         );
 
-        file.lower_mc(compiler.compiler(), compiler.machine_mode());
+        let context = create_context(compiler, &target, CgFlags::empty(), None);
+
+        file.lower_mc(compiler.compiler(), &context);
 
         println!("mce:");
         println!("{}", file.pretty_print(mach, mode));
