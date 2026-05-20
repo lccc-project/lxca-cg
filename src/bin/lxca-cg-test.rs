@@ -42,7 +42,7 @@ fn main() {
 
         let fuel = 100; // Treat this as a debug build, use 100 for now
 
-        // println!("optimized xva:");
+        println!("optimized xva:");
         run_passes(
             ALL_PASSES.iter().copied(),
             cmli::xva::opt::XvaOptPhase::AfterLower,
@@ -51,7 +51,7 @@ fn main() {
             mach,
             mode
         ); // treat this as debug build, use 100 for now
-        // println!("{}", file.pretty_print(mach, mode));
+        println!("{}", file.pretty_print(mach, mode));
 
         run_passes(
             ALL_PASSES.iter().copied(),
