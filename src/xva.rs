@@ -1,7 +1,7 @@
 use std::{collections::{HashMap, HashSet}, hash::BuildHasher, ops::Index};
 
 use cmli::{
-    compiler::{Compiler, CompilerContext}, instr::AddressKind, mach::{FeatureSet, MachineMode, Register, Regset}, xva::{
+    compiler::{Compiler, CompilerContext}, fmt::PrettyPrinter, instr::AddressKind, mach::{FeatureSet, MachineMode, Register, Regset}, xva::{
         self, BarrierKind, Linkage, XvaBasicBlock, XvaCategory, XvaDest, XvaExpr, XvaFile, XvaFrameProperties, XvaFunction, XvaFunctionDef, XvaObjectDef, XvaOpcode, XvaOperand, XvaRegister, XvaStatement, XvaType
     }
 };
@@ -116,6 +116,7 @@ struct XvaLowerer<'ir, 'a> {
     name: Constant<'ir, Symbol>,
     cur_label: Option<Constant<'ir, Symbol>>,
     opt_gate_num: u32,
+    supported_registers: Regset,
 }
 
 impl<'ir, 'a> XvaLowerer<'ir, 'a> {
@@ -161,6 +162,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             strings,
             cur_label: None,
             opt_gate_num: 0,
+            supported_registers: Regset::new(),
         }
     }
 
@@ -180,11 +182,21 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
 
         self.xva_function
             .preserve_regs
-            .insert_registers(&info.preserved_registers, mach);
+            .insert_regids(&info.preserved_registers, mach);
+
+        
+
+        self.xva_function.preserve_regs.retain_mask(*self.supported_registers);
 
         self.xva_function
             .clobber_regs
-            .insert_registers(&info.volatile_registers, mach);
+            .insert_regids(&info.volatile_registers, mach);
+
+        dbg!(self.xva_function.clobber_regs);
+
+        self.xva_function.clobber_regs.retain_mask(*self.supported_registers);
+
+        dbg!(self.xva_function.clobber_regs);
 
         let tys = sig.params(self.constants);
 
@@ -219,7 +231,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                     reg
                 }
                 crate::callconv::CallConvLocation::Registers(regs) => {
-                    self.xva_function.params.insert_registers(regs, mach);
+                    self.xva_function.params.insert_regids(regs, mach);
 
                     let xva_regs = regs.iter().map(|v| XvaRegister::Physical(*v)).collect::<Vec<_>>();
 
@@ -268,7 +280,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
         match &info.return_loc {
             crate::callconv::CallConvLocation::Void => {}
             crate::callconv::CallConvLocation::Registers(regs) => {
-                self.xva_function.return_regs.insert_registers(regs, mach);
+                self.xva_function.return_regs.insert_regids(regs, mach);
             }
             crate::callconv::CallConvLocation::Stack(_) => {
                 panic!("Cannot return directly on the stack")
@@ -288,13 +300,27 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 }));
 
                 if let Some(v) = info.return_place {
-                    self.xva_function.return_regs.insert_register(v, mach);
+                    self.xva_function.return_regs.insert_regid(v, mach);
                 }
             }
             crate::callconv::CallConvLocation::StackMemory(_) => {
                 panic!("Cannot return directly on the stack")
             }
             CallConvLocation::VReg(_) => panic!("Cannot use VReg in a real cc")
+        }
+
+        let mut unsupported_param_regs = self.xva_function.params;
+        let mut unsupported_return_regs = self.xva_function.return_regs;
+
+        unsupported_param_regs.remove_mask(*self.supported_registers);
+        unsupported_return_regs.remove_mask(*self.supported_registers);
+
+        if !unsupported_param_regs.is_empty() {
+            panic!("Calling Convention Error: Parameter Registers {} (function {}) are unsupported in current context", cmli::fmt::pretty_print_list(unsupported_param_regs, ", ", self.compiler.compiler().machine(), self.compiler.machine_mode()), self.name.get(self.constants));
+        }
+
+        if !unsupported_return_regs.is_empty() {
+            panic!("Calling Convention Error: Return Registers {} (function {}) are unsupported in current context", cmli::fmt::pretty_print_list(unsupported_return_regs, ", ", self.compiler.compiler().machine(), self.compiler.machine_mode()), self.name.get(self.constants));
         }
 
         self.xva_function.frame_properties.call_align = info.stack_align as usize;
@@ -830,9 +856,9 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
 
                 self.current_statements.push(XvaStatement::Call {
                     dest,
-                    params: Regset::from_registers(param_regs, mach),
-                    ret_val: Regset::from_registers(ret_regs, mach),
-                    call_clobber_regs: Regset::from_registers(volatile_regs, mach),
+                    params: Regset::from_regids(param_regs, mach),
+                    ret_val: Regset::from_regids(ret_regs, mach),
+                    call_clobber_regs: Regset::from_regids(volatile_regs, mach),
                 });
 
                 let ret_layout = layout_type(
@@ -942,6 +968,9 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
     }
 
     fn lower_function(&mut self, func: &FunctionBody<'ir>) {
+        
+        self.supported_registers = self.compiler.compiler().machine().registers().supported_registers(&self.xva_function.frame_properties.features, self.compiler.machine_mode());
+        dbg!(self.supported_registers);
         self.lower_cc(func.signature(), func.param_names());
 
         for (i, bb) in func.body().unwrap().iter().enumerate() {
