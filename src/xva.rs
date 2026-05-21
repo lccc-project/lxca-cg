@@ -192,11 +192,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             .clobber_regs
             .insert_regids(&info.volatile_registers, mach);
 
-        dbg!(self.xva_function.clobber_regs);
-
         self.xva_function.clobber_regs.retain_mask(*self.supported_registers);
-
-        dbg!(self.xva_function.clobber_regs);
 
         let tys = sig.params(self.constants);
 
@@ -970,7 +966,6 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
     fn lower_function(&mut self, func: &FunctionBody<'ir>) {
         
         self.supported_registers = self.compiler.compiler().machine().registers().supported_registers(&self.xva_function.frame_properties.features, self.compiler.machine_mode());
-        dbg!(self.supported_registers);
         self.lower_cc(func.signature(), func.param_names());
 
         for (i, bb) in func.body().unwrap().iter().enumerate() {
