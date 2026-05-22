@@ -90,7 +90,6 @@ pub fn layout_type<'ir>(
 ) -> TypeLayout {
     match ty.body(constants) {
         lxca::ir::types::TypeBody::Interned(_) => unreachable!(),
-        lxca::ir::types::TypeBody::Named(name) => todo!("named type {:?}", name.get(constants)),
         lxca::ir::types::TypeBody::Integer(int_type) => {
             TypeLayout::scalar_layout(int_type.width, XvaCategory::Int, targ)
         }

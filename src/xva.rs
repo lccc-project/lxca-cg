@@ -12,7 +12,7 @@ use lxca::ir::{
     constant::{Constant, ConstantPool},
     decls::{DeclarationBody, FunctionBody},
     expr::{
-        BasicBlock, Expr, FunctionCall, IntrinsicCall, JumpTarget, Statement, Terminator, Value,
+        BasicBlock, Expr, FunctionCall, IntrinsicCall, JumpTarget, SimpleExpr, Statement, Terminator, Value
     },
     file::File,
     intrinsics::Intrinsic,
@@ -325,10 +325,9 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
         self.info = Some(info);
     }
 
-    fn lower_expr(&mut self, dest: XvaRegister, expr: &Expr<'ir>) {
-        let expr = match expr.body(self.constants) {
-            lxca::ir::expr::ExprBody::Interned(constant) => unreachable!(),
-            lxca::ir::expr::ExprBody::Const(value) => match value.body(self.constants) {
+    fn lower_simple_expr(&mut self, dest: XvaRegister, expr: &SimpleExpr<'ir>) {
+        let expr = match expr.body() {
+            lxca::ir::expr::SimpleExprBody::Const(value) => match value.body(self.constants) {
                 lxca::ir::expr::ValueBody::Interned(constant) => unreachable!(),
                 lxca::ir::expr::ValueBody::Integer(val) => {
                     let val = val.read(self.constants);
@@ -378,68 +377,14 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 lxca::ir::expr::ValueBody::Struct(struct_value) => todo!("struct"),
                 _ => todo!(),
             },
-            lxca::ir::expr::ExprBody::UnaryOp(unary_op, overflow_behaviour, box_or_constant) => {
-                todo!()
-            }
-            lxca::ir::expr::ExprBody::BinaryOp(bin) => {
-                let ty = expr.ty();
-                let layout = layout_type(ty, self.constants, self.target);
-                let xva_ty = layout.xva_type();
-                let left = bin.2.get(self.constants);
-                let right = bin.3.get(self.constants);
-
-                let dest_left = XvaRegister::Virtual(XvaDest {
-                    id: self.vreg_num.fetch_inc(),
-                    ty: xva_ty,
-                });
-                let dest_right = XvaRegister::Virtual(XvaDest {
-                    id: self.vreg_num.fetch_inc(),
-                    ty: xva_ty,
-                });
-
-                self.lower_expr(dest_left, left);
-                self.lower_expr(dest_right, right);
-
-                match bin.0 {
-                    lxca::ir::expr::BinaryOp::Add => XvaOpcode::BinaryOp {
-                        op: xva::BinaryOp::Add,
-                        left: dest_left,
-                        right: xva::XvaOperand::Register(dest_right),
-                    },
-                    lxca::ir::expr::BinaryOp::Sub => XvaOpcode::BinaryOp {
-                        op: xva::BinaryOp::Sub,
-                        left: dest_left,
-                        right: xva::XvaOperand::Register(dest_right),
-                    },
-                    lxca::ir::expr::BinaryOp::And => XvaOpcode::BinaryOp {
-                        op: xva::BinaryOp::And,
-                        left: dest_left,
-                        right: xva::XvaOperand::Register(dest_right),
-                    },
-                    lxca::ir::expr::BinaryOp::Or => XvaOpcode::BinaryOp {
-                        op: xva::BinaryOp::Or,
-                        left: dest_left,
-                        right: xva::XvaOperand::Register(dest_right),
-                    },
-                    lxca::ir::expr::BinaryOp::Xor => XvaOpcode::BinaryOp {
-                        op: xva::BinaryOp::Xor,
-                        left: dest_left,
-                        right: xva::XvaOperand::Register(dest_right),
-                    },
-                    lxca::ir::expr::BinaryOp::Mul => todo!(),
-                    lxca::ir::expr::BinaryOp::Div => todo!(),
-                    lxca::ir::expr::BinaryOp::Mod => todo!(),
-                }
-            }
-            lxca::ir::expr::ExprBody::ReadField(box_or_constant, constant, constant1) => todo!(),
-            lxca::ir::expr::ExprBody::ProjectField(box_or_constant, constant, constant1) => todo!(),
-            lxca::ir::expr::ExprBody::SsaVar(var) => {
+            lxca::ir::expr::SimpleExprBody::SsaVar(var) => {
                 let cur_label = self.cur_label.unwrap();
 
                 let val = *self.local_vars.get(&cur_label).unwrap().get(var).unwrap();
 
                 XvaOpcode::Move(val)
             }
+
             _ => todo!(),
         };
 
@@ -450,13 +395,81 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
         }));
     }
 
-    fn lower_expr_as_operand(&mut self, expr: &Expr<'ir>) -> XvaOperand {
+    fn lower_expr(&mut self, dest: XvaRegister, expr: &Expr<'ir>) {
+        let expr = match expr.body(self.constants) {
+            lxca::ir::expr::ExprBody::Interned(constant) => unreachable!(),
+            lxca::ir::expr::ExprBody::Simple(simple) => {
+                self.lower_simple_expr(dest, simple);
+                return
+            }
+            lxca::ir::expr::ExprBody::UnaryOp(unary_op, overflow_behaviour, box_or_constant) => {
+                todo!()
+            }
+            lxca::ir::expr::ExprBody::BinaryOp(bin) => {
+                let ty = expr.ty();
+                let layout = layout_type(ty, self.constants, self.target);
+                let xva_ty = layout.xva_type();
+                let left = &bin.2;
+                let right = &bin.3;
+
+                let dest_left = XvaRegister::Virtual(XvaDest {
+                    id: self.vreg_num.fetch_inc(),
+                    ty: xva_ty,
+                });
+
+                self.lower_simple_expr(dest_left, left);
+
+                let right = self.lower_simple_expr_as_operand(right);
+
+                match bin.0 {
+                    lxca::ir::expr::BinaryOp::Add => XvaOpcode::BinaryOp {
+                        op: xva::BinaryOp::Add,
+                        left: dest_left,
+                        right,
+                    },
+                    lxca::ir::expr::BinaryOp::Sub => XvaOpcode::BinaryOp {
+                        op: xva::BinaryOp::Sub,
+                        left: dest_left,
+                        right,
+                    },
+                    lxca::ir::expr::BinaryOp::And => XvaOpcode::BinaryOp {
+                        op: xva::BinaryOp::And,
+                        left: dest_left,
+                        right,
+                    },
+                    lxca::ir::expr::BinaryOp::Or => XvaOpcode::BinaryOp {
+                        op: xva::BinaryOp::Or,
+                        left: dest_left,
+                        right,
+                    },
+                    lxca::ir::expr::BinaryOp::Xor => XvaOpcode::BinaryOp {
+                        op: xva::BinaryOp::Xor,
+                        left: dest_left,
+                        right,
+                    },
+                    lxca::ir::expr::BinaryOp::Mul => todo!(),
+                    lxca::ir::expr::BinaryOp::Div => todo!(),
+                    lxca::ir::expr::BinaryOp::Mod => todo!(),
+                }
+            }
+            lxca::ir::expr::ExprBody::ReadField(box_or_constant, constant, constant1) => todo!(),
+            lxca::ir::expr::ExprBody::ProjectField(box_or_constant, constant, constant1) => todo!(),
+            _ => todo!(),
+        };
+
+        self.current_statements.push(XvaStatement::Expr(XvaExpr {
+            dest,
+            dest2: None,
+            op: expr,
+        }));
+    }
+
+    fn lower_simple_expr_as_operand(&mut self, expr: &SimpleExpr<'ir>) -> XvaOperand {
         let layout = layout_type(expr.ty(), self.constants, self.target);
 
         let xva_ty = layout.xva_type();
-        match expr.body(self.constants) {
-            lxca::ir::expr::ExprBody::Interned(constant) => unreachable!(),
-            lxca::ir::expr::ExprBody::Const(value) => match value.body(self.constants) {
+        match expr.body() {
+            lxca::ir::expr::SimpleExprBody::Const(value) => match value.body(self.constants) {
                 lxca::ir::expr::ValueBody::Interned(constant) => unreachable!(),
                 lxca::ir::expr::ValueBody::Integer(val) => {
                     let val = val.read(self.constants);
@@ -487,17 +500,35 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                         id: self.vreg_num.fetch_inc(),
                         ty: xva_ty,
                     });
-                    self.lower_expr(reg, expr);
+                    self.lower_simple_expr(reg, expr);
                     XvaOperand::Register(reg)
                 }
             },
-            lxca::ir::expr::ExprBody::SsaVar(var) => {
+            lxca::ir::expr::SimpleExprBody::SsaVar(var) => {
                 let cur_label = self.cur_label.unwrap();
 
                 let val = *self.local_vars.get(&cur_label).unwrap().get(var).unwrap();
 
                 XvaOperand::Register(val)
             }
+            _ => {
+                let reg = XvaRegister::Virtual(XvaDest {
+                    id: self.vreg_num.fetch_inc(),
+                    ty: xva_ty,
+                });
+                self.lower_simple_expr(reg, expr);
+                XvaOperand::Register(reg)
+            }
+        }
+    }
+
+    fn lower_expr_as_operand(&mut self, expr: &Expr<'ir>) -> XvaOperand {
+        let layout = layout_type(expr.ty(), self.constants, self.target);
+
+        let xva_ty = layout.xva_type();
+        match expr.body(self.constants) {
+            lxca::ir::expr::ExprBody::Interned(constant) => unreachable!(),
+            lxca::ir::expr::ExprBody::Simple(simple) => self.lower_simple_expr_as_operand(simple),
             _ => {
                 let reg = XvaRegister::Virtual(XvaDest {
                     id: self.vreg_num.fetch_inc(),
@@ -825,11 +856,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             }));
         }
 
-        let label = format!(
-            "{}.{}",
-            self.name.get(self.constants),
-            targ.target.get(self.constants)
-        );
+        let label = self.bb_id_to_label(targ.target);
 
         self.current_statements
             .push(XvaStatement::Jump(cmli::intern::Symbol::intern(label)));
@@ -927,12 +954,24 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
         }
     }
 
+    fn bb_id_to_label(&self, label: Constant<'ir, Symbol>) -> String {
+        let st = label.get(self.constants).as_str();
+
+        let mut n = self.name.get(self.constants).as_str().to_string();
+
+        if let Some(label) = st.strip_prefix("%") {
+            n.push_str("._L");
+            n.push_str(label);
+        } else {
+            n.push_str(".");
+            n.push_str(st);
+        }
+
+        n
+    }
+
     fn lower_basic_block(&mut self, bb: &BasicBlock<'ir>) {
-        let label = format!(
-            "{}.{}",
-            self.name.get(self.constants),
-            bb.label().get(self.constants)
-        );
+        let label = self.bb_id_to_label(bb.label());
 
         let label = cmli::intern::Symbol::intern(label);
 
