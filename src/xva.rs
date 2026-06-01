@@ -16,7 +16,7 @@ use lxca::ir::{
     },
     file::File,
     intrinsics::Intrinsic,
-    symbol::Symbol,
+    symbol::{LabelSym, Symbol, VarSym},
     types::Signature,
 };
 use target_tuples::TargetRef;
@@ -104,7 +104,7 @@ pub trait XvaCompiler {
 struct XvaLowerer<'ir, 'a> {
     target: &'a Target,
     compiler: &'a (dyn XvaCompiler + 'a),
-    local_vars: IndexMap<Constant<'ir, Symbol>, IndexMap<Constant<'ir, Symbol>, XvaRegister>>,
+    local_vars: IndexMap<Constant<'ir, LabelSym>, IndexMap<Constant<'ir, VarSym>, XvaRegister>>,
     cc: Option<&'a dyn CallConv>,
     xva_function: XvaFunction,
     current_statements: Vec<XvaStatement>,
@@ -114,7 +114,7 @@ struct XvaLowerer<'ir, 'a> {
     vreg_num: u32,
     ret_ptr: Option<XvaRegister>,
     name: Constant<'ir, Symbol>,
-    cur_label: Option<Constant<'ir, Symbol>>,
+    cur_label: Option<Constant<'ir, LabelSym>>,
     opt_gate_num: u32,
     supported_registers: Regset,
 }
@@ -166,7 +166,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
         }
     }
 
-    fn lower_cc(&mut self, sig: &Signature<'ir>, param_names: &[Constant<'ir, Symbol>]) {
+    fn lower_cc(&mut self, sig: &Signature<'ir>, param_names: &[Constant<'ir, VarSym>]) {
         let callconv = self.compiler.call_conv();
 
         let mode = self.compiler.machine_mode();
@@ -380,7 +380,8 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             lxca::ir::expr::SimpleExprBody::SsaVar(var) => {
                 let cur_label = self.cur_label.unwrap();
 
-                let val = *self.local_vars.get(&cur_label).unwrap().get(var).unwrap();
+                let val = *self.local_vars.get(&cur_label).unwrap()
+                    .get(var).unwrap();
 
                 XvaOpcode::Move(val)
             }
@@ -954,12 +955,12 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
         }
     }
 
-    fn bb_id_to_label(&self, label: Constant<'ir, Symbol>) -> String {
+    fn bb_id_to_label(&self, label: Constant<'ir, LabelSym>) -> String {
         let st = label.get(self.constants).as_str();
 
         let mut n = self.name.get(self.constants).as_str().to_string();
 
-        if let Some(label) = st.strip_prefix("%") {
+        if let Some(label) = st.strip_prefix("@") {
             n.push_str("._L");
             n.push_str(label);
         } else {
