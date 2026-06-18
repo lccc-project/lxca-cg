@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cmli = { path = "cmli", default-features = false }
+cmli = { path = "cmli", default-features = false, features = ["xva"] }
 lxca = { git = "https://github.com/lccc-project/lxca" }
 lccc-targets = { path = "lccc-target" }
 target-tuples = { version = "0.16.1" }
@@ -18,9 +18,10 @@ bitflags = "2.11.1"
 x86 = ["cmli/x86"]
 x86_64 = ["x86"]
 skyarch = ["cmli/skyarch"]
+w65 = ["cmli/w65"]
 
 default-archs = ["x86", "x86_64"]
-all-archs = ["default-archs", "skyarch"]
+all-archs = ["default-archs", "skyarch", "w65"]
 default = ["default-archs"]
 
 test-files = ["lxca/test-files"]
