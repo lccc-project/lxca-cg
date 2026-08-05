@@ -1,5 +1,7 @@
 use cmli::{
-    compiler::{Compiler, CompilerContext}, mach::Register, xva::XvaRegister
+    compiler::{Compiler, CompilerContext},
+    mach::Register,
+    xva::XvaRegister,
 };
 use lccc_targets::properties::target::Target;
 use lxca::ir::{

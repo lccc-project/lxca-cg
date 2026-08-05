@@ -1,9 +1,19 @@
-use std::{collections::{HashMap, HashSet}, hash::BuildHasher, ops::Index};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::BuildHasher,
+    ops::Index,
+};
 
 use cmli::{
-    compiler::{Compiler, CompilerContext}, fmt::PrettyPrinter, instr::AddressKind, mach::{FeatureSet, MachineMode, Register, Regset}, xva::{
-        self, BarrierKind, Linkage, XvaBasicBlock, XvaCategory, XvaDest, XvaExpr, XvaFile, XvaFrameProperties, XvaFunction, XvaFunctionDef, XvaObjectDef, XvaOpcode, XvaOperand, XvaRegister, XvaStatement, XvaType
-    }
+    compiler::{Compiler, CompilerContext},
+    fmt::PrettyPrinter,
+    instr::AddressKind,
+    mach::{FeatureSet, MachineMode, Register, Regset},
+    xva::{
+        self, BarrierKind, Linkage, XvaBasicBlock, XvaCategory, XvaDest, XvaExpr, XvaFile,
+        XvaFrameProperties, XvaFunction, XvaFunctionDef, XvaObjectDef, XvaOpcode, XvaOperand,
+        XvaRegister, XvaStatement, XvaType,
+    },
 };
 use indexmap::{IndexMap, IndexSet};
 use lccc_siphash::{RawSipHasher, build::RandomState};
@@ -12,7 +22,8 @@ use lxca::ir::{
     constant::{Constant, ConstantPool},
     decls::{DeclarationBody, FunctionBody},
     expr::{
-        BasicBlock, Expr, FunctionCall, IntrinsicCall, JumpTarget, SimpleExpr, Statement, Terminator, Value
+        BasicBlock, Expr, FunctionCall, IntrinsicCall, JumpTarget, SimpleExpr, Statement,
+        Terminator, Value,
     },
     file::File,
     intrinsics::Intrinsic,
@@ -22,11 +33,11 @@ use lxca::ir::{
 use target_tuples::TargetRef;
 use target_tuples::pieces::Architecture;
 
-
 use crate::{
     callconv::{CallConv, CallConvInfo, CallConvLocation},
     helpers::FetchIncrement,
-    layout::layout_type, target::{AddressKinds, CgFlags},
+    layout::layout_type,
+    target::{AddressKinds, CgFlags},
 };
 
 pub type IntrinsicError = ();
@@ -45,7 +56,7 @@ pub trait XvaCompiler {
             AddressKind::Default
         };
 
-        let global_call = if flags.contains(CgFlags::PIC)  {
+        let global_call = if flags.contains(CgFlags::PIC) {
             if flags.contains(CgFlags::NO_PLT) {
                 AddressKind::GotRel
             } else {
@@ -128,7 +139,6 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
         name: Constant<'ir, Symbol>,
         strings: &'a mut DataMap,
     ) -> Self {
-
         let features = FeatureSet::from_names(global_features, compiler.compiler().machine());
         Self {
             compiler,
@@ -140,7 +150,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 clobber_regs: Regset::new(),
                 return_regs: Regset::new(),
                 body: Vec::new(),
-                frame_properties: XvaFrameProperties{
+                frame_properties: XvaFrameProperties {
                     frame_size: 0,
                     frame_align: 1,
                     call_align: 1,
@@ -184,19 +194,19 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             .preserve_regs
             .insert_regids(&info.preserved_registers, mach);
 
-        
-
-        self.xva_function.preserve_regs.retain_mask(*self.supported_registers);
+        self.xva_function
+            .preserve_regs
+            .retain_mask(*self.supported_registers);
 
         self.xva_function
             .clobber_regs
             .insert_regids(&info.volatile_registers, mach);
 
-        self.xva_function.clobber_regs.retain_mask(*self.supported_registers);
+        self.xva_function
+            .clobber_regs
+            .retain_mask(*self.supported_registers);
 
         let tys = sig.params(self.constants);
-
-        
 
         for (n, param) in info.param_map.iter().enumerate() {
             let is_param = info.lxca_param_range.contains(&n);
@@ -229,7 +239,10 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 crate::callconv::CallConvLocation::Registers(regs) => {
                     self.xva_function.params.insert_regids(regs, mach);
 
-                    let xva_regs = regs.iter().map(|v| XvaRegister::Physical(*v)).collect::<Vec<_>>();
+                    let xva_regs = regs
+                        .iter()
+                        .map(|v| XvaRegister::Physical(*v))
+                        .collect::<Vec<_>>();
 
                     let size =
                         size.unwrap_or_else(|| xva_regs.iter().map(|v| v.size(mach, mode)).sum());
@@ -264,7 +277,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 crate::callconv::CallConvLocation::StackMemory(range) => {
                     todo!("stack memory {range:?}")
                 }
-                CallConvLocation::VReg(_) => panic!("Cannot use VReg in a real cc")
+                CallConvLocation::VReg(_) => panic!("Cannot use VReg in a real cc"),
             };
 
             if is_param {
@@ -302,7 +315,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             crate::callconv::CallConvLocation::StackMemory(_) => {
                 panic!("Cannot return directly on the stack")
             }
-            CallConvLocation::VReg(_) => panic!("Cannot use VReg in a real cc")
+            CallConvLocation::VReg(_) => panic!("Cannot use VReg in a real cc"),
         }
 
         let mut unsupported_param_regs = self.xva_function.params;
@@ -312,11 +325,29 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
         unsupported_return_regs.remove_mask(*self.supported_registers);
 
         if !unsupported_param_regs.is_empty() {
-            panic!("Calling Convention Error: Parameter Registers {} (function {}) are unsupported in current context", cmli::fmt::pretty_print_list(unsupported_param_regs, ", ", self.compiler.compiler().machine(), self.compiler.machine_mode()), self.name.get(self.constants));
+            panic!(
+                "Calling Convention Error: Parameter Registers {} (function {}) are unsupported in current context",
+                cmli::fmt::pretty_print_list(
+                    unsupported_param_regs,
+                    ", ",
+                    self.compiler.compiler().machine(),
+                    self.compiler.machine_mode()
+                ),
+                self.name.get(self.constants)
+            );
         }
 
         if !unsupported_return_regs.is_empty() {
-            panic!("Calling Convention Error: Return Registers {} (function {}) are unsupported in current context", cmli::fmt::pretty_print_list(unsupported_return_regs, ", ", self.compiler.compiler().machine(), self.compiler.machine_mode()), self.name.get(self.constants));
+            panic!(
+                "Calling Convention Error: Return Registers {} (function {}) are unsupported in current context",
+                cmli::fmt::pretty_print_list(
+                    unsupported_return_regs,
+                    ", ",
+                    self.compiler.compiler().machine(),
+                    self.compiler.machine_mode()
+                ),
+                self.name.get(self.constants)
+            );
         }
 
         self.xva_function.frame_properties.call_align = info.stack_align as usize;
@@ -380,8 +411,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             lxca::ir::expr::SimpleExprBody::SsaVar(var) => {
                 let cur_label = self.cur_label.unwrap();
 
-                let val = *self.local_vars.get(&cur_label).unwrap()
-                    .get(var).unwrap();
+                let val = *self.local_vars.get(&cur_label).unwrap().get(var).unwrap();
 
                 XvaOpcode::Move(val)
             }
@@ -401,7 +431,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             lxca::ir::expr::ExprBody::Interned(constant) => unreachable!(),
             lxca::ir::expr::ExprBody::Simple(simple) => {
                 self.lower_simple_expr(dest, simple);
-                return
+                return;
             }
             lxca::ir::expr::ExprBody::UnaryOp(unary_op, overflow_behaviour, box_or_constant) => {
                 todo!()
@@ -603,8 +633,11 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             .compute_call_conv(Some(call_sig), fn_sig, self.constants, self.target)
             .unwrap();
 
-        self.xva_function.frame_properties.frame_align =
-            self.xva_function.frame_properties.frame_align.max(info.stack_align as usize); // Todo slide adjustment
+        self.xva_function.frame_properties.frame_align = self
+            .xva_function
+            .frame_properties
+            .frame_align
+            .max(info.stack_align as usize); // Todo slide adjustment
 
         for (reg, val) in info.extra_sets {
             self.current_statements.push(XvaStatement::Expr(XvaExpr {
@@ -650,7 +683,9 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 CallConvLocation::Stack(range) => todo!("push to stack"),
                 CallConvLocation::Memory(xva_register) => todo!("memory"),
                 CallConvLocation::StackMemory(range) => todo!("stack memory"),
-                CallConvLocation::VReg(_) => panic!("Virtual register not allowed for real function calls")
+                CallConvLocation::VReg(_) => {
+                    panic!("Virtual register not allowed for real function calls")
+                }
             }
         }
 
@@ -672,7 +707,9 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
 
             CallConvLocation::StackMemory(_) => todo!("stack memory"),
             CallConvLocation::Stack(_) => panic!("Cannot return directly on the stack"),
-            CallConvLocation::VReg(_) => panic!("Virtual register not allowed for real function calls")
+            CallConvLocation::VReg(_) => {
+                panic!("Virtual register not allowed for real function calls")
+            }
         };
 
         (param_regs, ret_place, ret_regs, info.volatile_registers)
@@ -1004,8 +1041,15 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
     }
 
     fn lower_function(&mut self, func: &FunctionBody<'ir>) {
-        
-        self.supported_registers = self.compiler.compiler().machine().registers().supported_registers(&self.xva_function.frame_properties.features, self.compiler.machine_mode());
+        self.supported_registers = self
+            .compiler
+            .compiler()
+            .machine()
+            .registers()
+            .supported_registers(
+                &self.xva_function.frame_properties.features,
+                self.compiler.machine_mode(),
+            );
         self.lower_cc(func.signature(), func.param_names());
 
         for (i, bb) in func.body().unwrap().iter().enumerate() {
@@ -1064,7 +1108,12 @@ impl DataMap {
     }
 }
 
-pub fn lower_lxca<'ir, S: AsRef<str>>(file: &File<'ir>, target: &Target, features: &HashSet<S>, compiler: &dyn XvaCompiler) -> XvaFile {
+pub fn lower_lxca<'ir, S: AsRef<str>>(
+    file: &File<'ir>,
+    target: &Target,
+    features: &HashSet<S>,
+    compiler: &dyn XvaCompiler,
+) -> XvaFile {
     let mut xva_file = XvaFile {
         functions: Vec::new(),
         weak_decls: Vec::new(),
@@ -1091,7 +1140,8 @@ pub fn lower_lxca<'ir, S: AsRef<str>>(file: &File<'ir>, target: &Target, feature
                     continue; // TODO: Emit weak decl
                 }
 
-                let mut lowerer = XvaLowerer::new(compiler, target, features, file.pool(), name, &mut data);
+                let mut lowerer =
+                    XvaLowerer::new(compiler, target, features, file.pool(), name, &mut data);
                 lowerer.lower_function(func);
                 let func = XvaFunctionDef {
                     body: lowerer.xva_function,
@@ -1126,8 +1176,10 @@ pub fn lower_lxca<'ir, S: AsRef<str>>(file: &File<'ir>, target: &Target, feature
 
 pub fn compiler_from_target(target: TargetRef) -> Option<&'static dyn XvaCompiler> {
     match target.canonical().arch {
-        #[cfg(feature = "x86_64")] Architecture::X86_64 { .. } => Some(&crate::x86_64::X86_64Compiler),
-        #[cfg(feature = "skyarch")] Architecture::Skyarch => Some(&crate::skyarch::SkyarchCompiler),
-        _ => None
+        #[cfg(feature = "x86_64")]
+        Architecture::X86_64 { .. } => Some(&crate::x86_64::X86_64Compiler),
+        #[cfg(feature = "skyarch")]
+        Architecture::Skyarch => Some(&crate::skyarch::SkyarchCompiler),
+        _ => None,
     }
 }

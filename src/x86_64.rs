@@ -4,11 +4,11 @@ use cmli::{
     archs::x86::{GprSize, X86, X86Mode, X86Register, XmmSize},
     compiler::CompilerContext,
     mach::MachineMode,
+    mach::Register,
     target::PropertyValue,
     traits::IdType as _,
     x86_registers,
     xva::XvaRegister,
-    mach::Register,
 };
 use lccc_targets::properties::{ExtPropertyValue, target::Target};
 
@@ -214,10 +214,7 @@ impl CallConvSpec for X86_64Abi {
                     return None;
                 };
 
-                Some(vec![
-                    Register::new(reg1),
-                    Register::new(reg2),
-                ])
+                Some(vec![Register::new(reg1), Register::new(reg2)])
             }
             [
                 (ParameterFragmentClass::Integer, len),
@@ -343,10 +340,7 @@ impl CallConvSpec for X86_64Abi {
         None
     }
 
-    fn assign_registers_return(
-        &self,
-        frags: &[(ParameterFragmentClass, u32)],
-    ) -> Vec<Register> {
+    fn assign_registers_return(&self, frags: &[(ParameterFragmentClass, u32)]) -> Vec<Register> {
         let mut regs = Vec::with_capacity(frags.len().min(2));
 
         // Special Cases
@@ -423,10 +417,7 @@ impl CallConvSpec for X86_64Abi {
             }
         };
 
-        regs.iter()
-            .copied()
-            .map(|v| Register::new(v))
-            .collect()
+        regs.iter().copied().map(|v| Register::new(v)).collect()
     }
 
     fn volatile_registers(&self) -> Vec<Register> {
@@ -449,20 +440,14 @@ impl CallConvSpec for X86_64Abi {
             ],
         };
 
-        regs.iter()
-            .copied()
-            .map(|v| Register::new(v))
-            .collect()
+        regs.iter().copied().map(|v| Register::new(v)).collect()
     }
 
     fn add_assigns(&self, state: &X86_64AbiState<'_>, is_varargs: bool) -> Vec<(Register, u64)> {
         match self {
             X86_64Abi::SysV => {
                 if is_varargs {
-                    vec![(
-                        Register::new(X86Register::Byte(0)),
-                        state.vreg_pos as u64,
-                    )]
+                    vec![(Register::new(X86Register::Byte(0)), state.vreg_pos as u64)]
                 } else {
                     Vec::new()
                 }

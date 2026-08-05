@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cmli = { path = "cmli", default-features = false, features = ["xva"] }
+cmli = { path = "cmli", default-features = false, features = ["xva", "asm-parse"] }
 lxca = { git = "https://github.com/lccc-project/lxca" }
 lccc-targets = { path = "lccc-target" }
 target-tuples = { version = "0.16.1" }
