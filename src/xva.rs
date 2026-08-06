@@ -387,7 +387,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
 
                     XvaOpcode::Const(xva::XvaConst::Global(cmli::intern::Symbol::intern(sym), 0))
                 }
-                lxca::ir::expr::ValueBody::LocalAddr(constant) => {
+                lxca::ir::expr::ValueBody::LocalAddr(constant, _) => {
                     let sym = format!(
                         "{}.{}",
                         self.name.get(self.constants),
@@ -408,7 +408,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                 lxca::ir::expr::ValueBody::Struct(struct_value) => todo!("struct"),
                 _ => todo!(),
             },
-            lxca::ir::expr::SimpleExprBody::SsaVar(var) => {
+            lxca::ir::expr::SimpleExprBody::SsaVar(var, _) => {
                 let cur_label = self.cur_label.unwrap();
 
                 let val = *self.local_vars.get(&cur_label).unwrap().get(var).unwrap();
@@ -517,7 +517,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
 
                     XvaOperand::Const(xva::XvaConst::Global(cmli::intern::Symbol::intern(sym), 0))
                 }
-                lxca::ir::expr::ValueBody::LocalAddr(constant) => {
+                lxca::ir::expr::ValueBody::LocalAddr(constant, _) => {
                     let sym = format!(
                         "{}.{}",
                         self.name.get(self.constants),
@@ -535,7 +535,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                     XvaOperand::Register(reg)
                 }
             },
-            lxca::ir::expr::SimpleExprBody::SsaVar(var) => {
+            lxca::ir::expr::SimpleExprBody::SsaVar(var, _) => {
                 let cur_label = self.cur_label.unwrap();
 
                 let val = *self.local_vars.get(&cur_label).unwrap().get(var).unwrap();
@@ -1052,28 +1052,37 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             );
         self.lower_cc(func.signature(), func.param_names());
 
-        for (i, bb) in func.body().unwrap().iter().enumerate() {
-            let cur_label = bb.label();
-            self.local_vars.insert(cur_label, IndexMap::new());
-            let local_vars = self.local_vars.get_mut(&cur_label).unwrap();
-            if i != 0 {
-                for (param, ty) in bb.params() {
-                    let layout = layout_type(ty, self.constants, self.target);
+        let body = func.body().unwrap();
 
-                    let xva_ty = layout.xva_type();
+        match body {
+            lxca::ir::decls::FunctionBodyInner::Lxca(bbs) => {
+                for (i, bb) in bbs.iter().enumerate() {
+                    let cur_label = bb.label();
+                    self.local_vars.insert(cur_label, IndexMap::new());
+                    let local_vars = self.local_vars.get_mut(&cur_label).unwrap();
+                    if i != 0 {
+                        for (param, ty) in bb.params() {
+                            let layout = layout_type(ty, self.constants, self.target);
 
-                    let reg = XvaRegister::Virtual(XvaDest {
-                        id: self.vreg_num.fetch_inc(),
-                        ty: xva_ty,
-                    });
-                    local_vars.insert(*param, reg);
+                            let xva_ty = layout.xva_type();
+
+                            let reg = XvaRegister::Virtual(XvaDest {
+                                id: self.vreg_num.fetch_inc(),
+                                ty: xva_ty,
+                            });
+                            local_vars.insert(*param, reg);
+                        }
+                    }
                 }
-            }
+
+                for bb in bbs {
+                    self.lower_basic_block(bb);
+                }
+            },
+            lxca::ir::decls::FunctionBodyInner::Naked(inline_assembly) => todo!("asm"),
         }
 
-        for bb in func.body().unwrap() {
-            self.lower_basic_block(bb);
-        }
+        
     }
 }
 
