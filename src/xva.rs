@@ -14,21 +14,15 @@ use cmli::{
         XvaFrameProperties, XvaFunction, XvaFunctionDef, XvaObjectDef, XvaOpcode, XvaOperand,
         XvaRegister, XvaStatement, XvaType,
     },
+    intern::Symbol as CmliSymbol,
 };
 use indexmap::{IndexMap, IndexSet};
 use lccc_siphash::{RawSipHasher, build::RandomState};
-use lccc_targets::properties::{arch::Machine, target::Target};
+use lccc_targets::properties::{arch::Machine, env::{BuiltinSymbol, Env}, target::Target};
 use lxca::ir::{
-    constant::{Constant, ConstantPool},
-    decls::{DeclarationBody, FunctionBody},
-    expr::{
-        BasicBlock, Expr, FunctionCall, IntrinsicCall, JumpTarget, SimpleExpr, Statement,
-        Terminator, Value,
-    },
-    file::File,
-    intrinsics::Intrinsic,
-    symbol::{LabelSym, Symbol, VarSym},
-    types::Signature,
+    constant::{Constant, ConstantPool}, decls::{DeclarationBody, FunctionBody}, expr::{
+        BasicBlock, Expr, FunctionCall, IntrinsicCall, JumpTarget, SimpleExpr, Statement, Terminator, Value, ValueBody,
+    }, file::File, intrinsics::Intrinsic, symbol::{LabelSym, Symbol, VarSym}, types::Signature,
 };
 use target_tuples::TargetRef;
 use target_tuples::pieces::Architecture;
@@ -107,8 +101,76 @@ pub trait XvaCompiler {
         constant_pool: &ConstantPool<'ir>,
         output_ty: XvaType,
         vreg_supplier: &mut dyn FnMut(XvaType) -> XvaRegister,
+        features: &FeatureSet,
     ) -> Result<XvaRegister, IntrinsicError> {
         Err(())
+    }
+
+    fn lower_inline_memory_intrinsic(&self, 
+        intrin: MemoryIntrinsic, 
+        args: &[XvaRegister],
+        output: &mut Vec<XvaStatement>,
+        output_ty: XvaType,
+        vreg_supplier: &mut dyn FnMut(XvaType) -> XvaRegister,
+        features: &FeatureSet,
+    ) -> Option<XvaRegister> {
+        None
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum MemoryIntrinsic {
+    Memcpy,
+    Memcmp,
+    Memmove,
+    MemcmpEq,
+    Memchr,
+    Memset,
+    Strcpy,
+    Strchr,
+    Strstr,
+    Strlen,
+    Strcmp,
+    StrcmpEq,
+}
+
+impl MemoryIntrinsic {
+    pub const fn from_lxca<'ir>(intrin: Intrinsic<'ir>) -> Self {
+        match intrin {
+            Intrinsic::Memcpy { .. } => MemoryIntrinsic::Memcpy,
+            Intrinsic::Memmove { .. } => MemoryIntrinsic::Memmove,
+            Intrinsic::Memcmp { .. } => MemoryIntrinsic::Memcmp,
+            Intrinsic::MemcmpEq { .. } => MemoryIntrinsic::MemcmpEq,
+            Intrinsic::Memchr { .. } => MemoryIntrinsic::Memchr,
+            Intrinsic::Memset { .. } => MemoryIntrinsic::Memset,
+            Intrinsic::Strcpy { .. } => MemoryIntrinsic::Strcpy,
+            Intrinsic::Strchr { .. } => MemoryIntrinsic::Strchr,
+            Intrinsic::Strstr { .. } => MemoryIntrinsic::Strstr,
+            Intrinsic::Strcmp { .. } => MemoryIntrinsic::Strcmp,
+            Intrinsic::StrcmpEq { .. } => MemoryIntrinsic::StrcmpEq,
+            Intrinsic::Strlen { .. } => MemoryIntrinsic::Strlen,
+            _ => panic!("Not a memory intrinsic"),
+        }
+    }
+
+    /// Finds the builtin symbol that implements this intrinsic on the given `env`, if one exists
+    pub fn find_symbol(&self, env: &Env) -> Option<BuiltinSymbol> {
+        let valid = match self {
+            MemoryIntrinsic::Memcpy => const { &[BuiltinSymbol::Memcpy, BuiltinSymbol::Memmove] as &[_] },
+            MemoryIntrinsic::Memcmp => const { &[BuiltinSymbol::Memcmp] },
+            MemoryIntrinsic::Memmove => const { &[BuiltinSymbol::Memmove] },
+            MemoryIntrinsic::MemcmpEq => const { &[BuiltinSymbol::MemcmpEq, BuiltinSymbol::Bcmp, BuiltinSymbol::Memcmp]},
+            MemoryIntrinsic::Memchr => const { &[BuiltinSymbol::Memchr] },
+            MemoryIntrinsic::Memset => const { &[BuiltinSymbol::Memset] },
+            MemoryIntrinsic::Strcpy => const { &[BuiltinSymbol::Strcpy] },
+            MemoryIntrinsic::Strchr => const { &[BuiltinSymbol::Strchr]},
+            MemoryIntrinsic::Strstr => const { &[BuiltinSymbol::Strstr]},
+            MemoryIntrinsic::Strlen => const { &[BuiltinSymbol::Strlen] },
+            MemoryIntrinsic::Strcmp => const { &[BuiltinSymbol::Strcmp] },
+            MemoryIntrinsic::StrcmpEq => const { &[BuiltinSymbol::Strcmp] },
+        };
+
+        valid.iter().copied().find(|r| env.supported_builtins.contains(r))
     }
 }
 
@@ -715,6 +777,18 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
         (param_regs, ret_place, ret_regs, info.volatile_registers)
     }
 
+    fn push_adhoc_block(&mut self, name: &str) -> cmli::intern::Symbol {
+        let bbid = self.cur_label.take().unwrap();
+        let label = self.bb_id_to_label(bbid);
+        let newlabel = cmli::intern::Symbol::intern(format!("{label}._R._{name}"));
+        let mut stmts = core::mem::take(&mut self.current_statements);
+        todo!()
+    }
+
+    fn lower_memory_intrinsic(&mut self, mem: MemoryIntrinsic, params: &[XvaRegister], ret_ty: Option<XvaType>, next: Option<CmliSymbol>) -> XvaRegister {
+        todo!()
+    }
+
     fn lower_intrin_call(&mut self, intrin: &IntrinsicCall<'ir>, tailcall: bool) -> XvaRegister {
         let IntrinsicCall {
             target,
@@ -769,6 +843,7 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                                         ty,
                                     })
                                 },
+                                &self.xva_function.frame_properties.features
                             )
                             .expect("Intrinsic Lowering Failed"),
                         false,
@@ -823,6 +898,64 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
                     dest2: None,
                     op: XvaOpcode::Uninit,
                 }));
+                (reg, false)
+            }
+            | Intrinsic::Memcpy { inline } 
+            | Intrinsic::Memmove { inline }
+            | Intrinsic::Memchr { inline }
+            | Intrinsic::Memset { inline }
+            | Intrinsic::Memcmp { inline }
+            | Intrinsic::MemcmpEq {inline}
+            | Intrinsic::Strcpy { inline }
+            | Intrinsic::Strcmp { inline }
+            | Intrinsic::StrcmpEq {inline}
+            | Intrinsic::Strchr { inline }
+            | Intrinsic::Strstr { inline }
+            | Intrinsic::Strlen { inline } => {
+                let mem = MemoryIntrinsic::from_lxca(*target);
+                let inline = *inline;
+                let volatile = match &**const_params{
+                    [] => false,
+                    [val] => match val.body(self.constants) {
+                        ValueBody::ZeroInit => false,
+                        ValueBody::Integer(v) => v.read(self.constants) != 0,
+                        _ => panic!("Unexpected constant list for intrinsic {mem:?}")
+                    }
+                    _ => panic!("Unexpected constant list for intrinsic {mem:?}")
+                };
+
+                let mut volatile_opt_gate: u32 = 0;
+
+                if volatile {
+                    volatile_opt_gate = self.opt_gate_num.fetch_inc();
+                    self.current_statements.push(XvaStatement::OptGate(BarrierKind::DO_NOT_OPTIMIZE, volatile_opt_gate));
+                }
+                'a: {
+                    if !inline {
+
+                        if let Some(sym) = mem.find_symbol(&self.target.env) {
+                            let cmli_sym = cmli::intern::Symbol::intern(sym.symbol_name());
+
+                        }
+                    }
+
+
+                    let reg = todo!();
+
+                    (reg, false)
+                }
+                
+            }
+            Intrinsic::Trap => {
+                self.current_statements.push(XvaStatement::Trap(xva::XvaTrap::Abort));
+                let reg = XvaRegister::Virtual(XvaDest{id: self.vreg_num.fetch_inc(), ty: XvaType::VOID});
+
+                (reg, true)
+            }
+            Intrinsic::Breakpoint => {
+                self.current_statements.push(XvaStatement::Breakpoint);
+                let reg = XvaRegister::Virtual(XvaDest{id: self.vreg_num.fetch_inc(), ty: XvaType::VOID});
+
                 (reg, false)
             }
             _ => todo!("Unknown intrinsic"),
@@ -987,6 +1120,9 @@ impl<'ir, 'a> XvaLowerer<'ir, 'a> {
             }
             lxca::ir::expr::TerminatorBody::TailcallIntrinsic(intrin) => {
                 self.lower_intrin_call(intrin, true);
+            }
+            lxca::ir::expr::TerminatorBody::ReturnVoid => {
+                self.current_statements.push(XvaStatement::Return);
             }
             _ => todo!(),
         }
@@ -1189,6 +1325,8 @@ pub fn compiler_from_target(target: TargetRef) -> Option<&'static dyn XvaCompile
         Architecture::X86_64 { .. } => Some(&crate::x86_64::X86_64Compiler),
         #[cfg(feature = "skyarch")]
         Architecture::Skyarch => Some(&crate::skyarch::SkyarchCompiler),
+        #[cfg(feature = "w65")]
+        Architecture::Wc65c816 => Some(&crate::w65::W65Compiler),
         _ => None,
     }
 }

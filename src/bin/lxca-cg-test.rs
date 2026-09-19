@@ -40,6 +40,7 @@ fn main() {
         .next()
         .unwrap_or_else(|| String::from("x86_64-pc-linux-gnu"));
     let target = TargetRef::parse(&target_name);
+    println!("{}", target.canonical());
 
     let compiler = lxca_cg::xva::compiler_from_target(target).unwrap();
 

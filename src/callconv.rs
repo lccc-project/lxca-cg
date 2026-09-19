@@ -282,7 +282,7 @@ fn classify_ty<'ir>(
     let mut frag_array = Vec::new();
     let mut extent_array = Vec::new();
     match ty.body(pool) {
-        lxca::ir::types::TypeBody::Interned(constant) => unreachable!(),
+        lxca::ir::types::TypeBody::Interned(_) => unreachable!(),
         lxca::ir::types::TypeBody::Integer(int_type) => {
             spec.classify_int(int_type.width, info, |frag, base, len| {
                 frag_array.push((frag, len));
@@ -306,7 +306,7 @@ fn classify_ty<'ir>(
             );
         }
         lxca::ir::types::TypeBody::Function(signature) => panic!("Cannot Classify Function Types"),
-        lxca::ir::types::TypeBody::Void => {}
+        lxca::ir::types::TypeBody::Void | lxca::ir::types::TypeBody::Never => {}
         _ => todo!(),
     }
 

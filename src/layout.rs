@@ -2,10 +2,10 @@ use std::num::NonZeroU64;
 
 use cmli::xva::{XvaCategory, XvaType};
 use lccc_targets::properties::target::Target;
-use lxca::ir::{
+use lxca::{ir::{
     constant::ConstantPool,
-    types::{IntType, Type},
-};
+    types::{Type},
+}, nzlit};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct SizeAlign {
@@ -102,7 +102,8 @@ pub fn layout_type<'ir>(
             targ,
         ),
         lxca::ir::types::TypeBody::Function(_) => panic!("Cannot layout a function type"),
-        lxca::ir::types::TypeBody::Void => panic!("Cannot layout void"),
+        lxca::ir::types::TypeBody::Void |
+        lxca::ir::types::TypeBody::Never => TypeLayout { size_align: SizeAlign { size: 0, align: nzlit!(1) }, category: XvaCategory::Null, fields: Fields::Scalar },
         _ => todo!(),
     }
 }
