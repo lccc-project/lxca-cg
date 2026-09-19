@@ -144,11 +144,12 @@ impl CallConvSpec for W65CallConv {
         [W65Register::Ab, W65Register::Aw, W65Register::Xb, W65Register::Xw, W65Register::Yb, W65Register::Yw, W65Register::B].into_iter()
             .chain((0..4).map(W65Register::R))
             .chain((0..8).map(W65Register::Rw))
+            .chain([W65Register::R(7), W65Register::Rw(14), W65Register::Rw(15)])
             .map(Register::new).collect()
     }
 
     fn non_volatile_registers(&self) -> Vec<cmli::mach::Register> {
-        (4..8).map(W65Register::R).chain((8..16).map(W65Register::Rw)).map(Register::new).collect()
+        (4..7).map(W65Register::R).chain((8..14).map(W65Register::Rw)).map(Register::new).collect()
     }
 
     fn add_assigns(
